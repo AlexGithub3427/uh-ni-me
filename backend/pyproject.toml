@@ -1,0 +1,17 @@
+[project]
+name = "uh-ni-me-backend"
+version = "0.1.0"
+description = "UH-NI-ME backend: FastAPI API, data ingest and daily puzzle jobs"
+authors = [
+    { name = "Alex Tran", email = "tranalex3427@gmail.com" }
+]
+requires-python = ">=3.13"
+dependencies = []
+
+[dependency-groups]
+dev = []
+
+[tool.uv]
+# Application, not an installable library: modules (app, ingest, jobs) are run
+# from backend/, e.g. `uv run uvicorn app.main:app`.
+package = false
