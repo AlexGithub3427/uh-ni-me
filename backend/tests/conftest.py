@@ -15,17 +15,23 @@ BACKEND_DIR = Path(__file__).resolve().parents[1]
 
 
 @pytest.fixture(scope="session")
-def db_engine() -> Iterator[Engine]:
-    """Run ``alembic upgrade head`` once against TEST_DATABASE_URL."""
+def alembic_config() -> Config:
+    """Alembic pointed at TEST_DATABASE_URL."""
     settings = get_settings()
     if settings.test_database_url == settings.database_url:
         pytest.exit("TEST_DATABASE_URL must not be the same database as DATABASE_URL")
 
-    alembic_config = Config(BACKEND_DIR / "alembic.ini")
-    alembic_config.set_main_option("sqlalchemy.url", settings.sync_test_database_url)
+    config = Config(BACKEND_DIR / "alembic.ini")
+    config.set_main_option("sqlalchemy.url", settings.sync_test_database_url)
+    return config
+
+
+@pytest.fixture(scope="session")
+def db_engine(alembic_config: Config) -> Iterator[Engine]:
+    """Run ``alembic upgrade head`` once against TEST_DATABASE_URL."""
     command.upgrade(alembic_config, "head")
 
-    engine = create_engine(settings.sync_test_database_url)
+    engine = create_engine(get_settings().sync_test_database_url)
     yield engine
     engine.dispose()
 

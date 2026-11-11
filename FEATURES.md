@@ -19,66 +19,79 @@ Set up the monorepo with `frontend/` (Next.js App Router + TS + Tailwind) and `b
 - [x] Backend reads config from env vars via a Pydantic settings class, with defaults matching `.env.example`
 - [x] Next.js rewrites `/api/*` to the backend at `API_URL` (a server-side env var). The browser only ever calls same-origin `/api/...` paths, and the home page calls `/api/health` this way
 
-### F-002 · Database schema · `todo`
-Create SQLAlchemy models and Alembic migrations for the schema below. Conventions: `bigint` identity keys unless noted, `timestamptz` for times, `text` + `CHECK` instead of Postgres enums, and `day` is always a UTC date.
+### F-002 · Database schema · `done`
+Create SQLAlchemy models and Alembic migrations for the schema below. Conventions: `bigint` identity keys (`GENERATED ALWAYS AS IDENTITY`) unless noted, `timestamptz` for times, `text` + `CHECK` instead of Postgres enums, and `day` is always a UTC date. Every column is `NOT NULL` unless marked `NULL`. Constraints and indexes get explicit names through a SQLAlchemy naming convention.
 
 ```
 entity
   id PK, kind text CHECK (anime|character|studio|franchise)
   canonical_name text, popularity int
   start_year int NULL, end_year int NULL          -- anime only; end_year NULL = still airing
-  score int NULL                                  -- anime only: average score, 0–100
+  score int NULL CHECK (0–100)                    -- anime only: average score
   CHECK ((start_year IS NULL AND end_year IS NULL AND score IS NULL) OR kind = 'anime')
-  CHECK (end_year IS NULL OR end_year >= start_year)
+  CHECK (end_year IS NULL OR (start_year IS NOT NULL AND end_year >= start_year))
   anilist_id int NULL, mal_id int NULL, wikidata_id text NULL
   franchise_id NULL → entity.id                   -- anime only: the franchise entity it belongs to
   CHECK (franchise_id IS NULL OR kind = 'anime')
-  UNIQUE (kind, anilist_id)
+  UNIQUE (kind, anilist_id); INDEX (franchise_id)
 
 entity_alias
-  id PK, entity_id → entity, alias text, normalized text
-  UNIQUE (entity_id, normalized); INDEX (entity_id); GIN trgm (normalized)
+  id PK, entity_id → entity, alias text, normalized text CHECK (normalized <> '')
+  UNIQUE (entity_id, normalized); GIN trgm (normalized)
 
 fact
   id PK, subject_id → entity, predicate text
   object_id NULL → entity, value text NULL, source text
   CHECK (exactly one of object_id / value is set)
-  UNIQUE (subject_id, predicate, object_id) WHERE object_id IS NOT NULL
-  UNIQUE (subject_id, predicate, value)     WHERE value IS NOT NULL
+  UNIQUE (subject_id, predicate, object_id, source) WHERE object_id IS NOT NULL
+  UNIQUE (subject_id, predicate, value, source)     WHERE value IS NOT NULL
   INDEX (predicate, object_id), (predicate, value)
 
 prompt_template
-  id PK, slug text UNIQUE, text text, answer_kind text
-  query_def jsonb, active bool                    -- answer_kind is any entity kind
+  id PK, slug text UNIQUE, text text
+  answer_kind text CHECK (anime|character|studio|franchise)
+  query_def jsonb, active bool DEFAULT true
 
 prompt
-  id PK, template_id → prompt_template, params jsonb, text text, active bool
+  id PK, template_id → prompt_template, params jsonb, text text, active bool DEFAULT true
   UNIQUE (template_id, params)
 
 prompt_answer
-  PK (prompt_id, entity_id), base_rarity real, times_answered int DEFAULT 0
+  PK (prompt_id, entity_id), base_rarity real CHECK (0–1), times_answered int DEFAULT 0 CHECK (>= 0)
 
 daily_puzzle
-  PK (day, position), prompt_id → prompt
+  PK (day, position), prompt_id → prompt, CHECK (position >= 1)   -- positions are 1-based
   UNIQUE (day, prompt_id); INDEX (prompt_id, day)
 
 player
-  id uuid PK, created_at
+  id uuid PK DEFAULT gen_random_uuid(), created_at DEFAULT now()
 
 submission                                        -- one row per player per prompt; created at start
   id PK, player_id → player, day date, prompt_id → prompt, started_at
+  FOREIGN KEY (day, prompt_id) → daily_puzzle (day, prompt_id)   -- the prompt must be in that day's puzzle
   guess_count int DEFAULT 0, wrong_guesses text[] DEFAULT '{}'
   finished_at NULL, raw_text NULL, matched_entity_id NULL → entity   -- raw_text = the accepted input
-  outcome text NULL CHECK (accepted|expired), points int NULL, rarity_tier text NULL
-  UNIQUE (player_id, prompt_id, day)
+  outcome text NULL CHECK (accepted|expired), points int NULL
+  rarity_tier text NULL CHECK (larp|normie|niche|weeb|uh-ni-me)
+  CHECK ((outcome IS NULL) = (finished_at IS NULL))
+  CHECK ((outcome IS NOT DISTINCT FROM 'accepted') = (matched_entity_id IS NOT NULL))
+  UNIQUE (player_id, day, prompt_id)
 ```
 
 A submission whose deadline has passed with `outcome` still NULL counts as expired; the server writes `expired` the next time it touches the row.
 
-- [ ] `pg_trgm` extension enabled in a migration
-- [ ] All tables, constraints and indexes above exist after `alembic upgrade head`
-- [ ] Tests prove the constraints reject bad rows: duplicate `(kind, anilist_id)`, a fact with both or neither of `object_id` / `value`, a `start_year` on a non-anime entity, an `end_year` before `start_year`, a duplicate `(player_id, prompt_id, day)` submission
-- [ ] `alembic downgrade base` then `upgrade head` runs cleanly
+Fact uniqueness includes `source`, so each source owns its own rows and two sources may assert the same fact. Anything reading facts must treat them as existence checks.
+
+Deletes: derived data cascades and history blocks. `ON DELETE CASCADE` on `entity_alias.entity_id`, `fact.subject_id`, `fact.object_id`, `prompt_answer.prompt_id` and `prompt_answer.entity_id`. Every other foreign key is `RESTRICT`, so an entity that a player has been awarded can't be deleted.
+
+The database does not check that `franchise_id` points at a `franchise` entity; ingest tests cover that (F-011).
+
+- [x] `pg_trgm` extension enabled in a migration (`CREATE EXTENSION IF NOT EXISTS`; the downgrade leaves the extension in place)
+- [x] All tables, constraints and indexes above exist after `alembic upgrade head`
+- [x] Tests prove the constraints reject bad rows: duplicate `(kind, anilist_id)`, a fact with both or neither of `object_id` / `value`, a `start_year` on a non-anime entity, an `end_year` before `start_year` or without one, a `score` outside 0–100, an empty `normalized` alias, an unknown `answer_kind`, a `base_rarity` outside 0–1, a `position` below 1, a duplicate `(player_id, day, prompt_id)` submission, a submission for a prompt not in that day's puzzle, an `outcome` without `finished_at`, an `accepted` outcome without `matched_entity_id`, an unknown `rarity_tier`
+- [x] The same fact from two different sources is allowed; the same fact twice from one source is rejected
+- [x] Deleting an entity removes its aliases, facts and prompt answers; deleting an entity referenced by a submission is rejected
+- [x] `alembic downgrade base` then `upgrade head` runs cleanly
 
 ### F-003 · Normalization utility · `todo`
 A single `normalize(text) -> str` in `backend/app/services/normalize.py`.
@@ -220,7 +233,7 @@ Pure function in `services/scoring.py`. Points are fixed per rarity tier; the ma
 | `larp` (most common answers) | 10 |
 | `normie` | 30 |
 | `niche` | 60 |
-| `ebk` (shown as "EBK") | 85 |
+| `weeb` | 85 |
 | `uh-ni-me` (rarest answers) | 100 |
 
 - [ ] No valid answer → 0
