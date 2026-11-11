@@ -2,7 +2,7 @@
 
 A daily anime trivia game where **rare answers score more**. Inspired by Krillion.
 
-Every day, everyone gets the same 7 open-ended prompts, like *"Name an anime produced by MAPPA"* or *"Name a character voiced by Kana Hanazawa."* You have 25 seconds per prompt to type one answer. Any valid answer is accepted, and the more obscure it is, the more points it earns.
+Every day, everyone gets the same 7 open-ended prompts, like *"Name an anime produced by MAPPA"* or *"Name a character from Fullmetal Alchemist: Brotherhood."* You have 25 seconds per prompt and can keep guessing until one answer lands. Any valid answer is accepted, and the more obscure it is, the more points it earns.
 
 > Status: pre-MVP. See [FEATURES.md](FEATURES.md) for the roadmap and feature specs.
 
@@ -22,9 +22,9 @@ Ingest worker ──► Postgres ◄── Prompt job    Game API (FastAPI)
                    answers)  ◄───────────── Answer matcher ──► Scorer
 ```
 
-1. **Ingest (nightly):** Pull anime, characters, staff and studios from public APIs into a small knowledge graph (`entity`, `entity_alias`, `fact`).
+1. **Ingest (nightly):** Pull anime, characters and studios from public APIs into a small knowledge graph (`entity`, `entity_alias`, `fact`).
 2. **Prompt generation:** Fill prompt templates (e.g. `Name an anime by {studio}`), compute each prompt's full set of valid answers, and keep only prompts with a playable answer count.
-3. **Daily puzzle:** Choose 7 prompts with a balanced difficulty mix.
+3. **Daily puzzle:** Choose 7 prompts, with no template used more than twice.
 4. **Play:** The client submits free-text answers. The matcher resolves them against aliases with fuzzy matching, and the scorer awards points based on rarity.
 5. **Rarity:** Starts as inverse popularity (AniList/MAL member counts), then blends in how often real players give each answer.
 
@@ -77,14 +77,19 @@ uh-ni-me/
 
 ```bash
 cp .env.example .env
-# fill in DATABASE_URL and MAL_CLIENT_ID
+# check DATABASE_URL / TEST_DATABASE_URL and set INGEST_USER_AGENT
+echo "API_URL=http://localhost:8000" > frontend/.env.local   # Next.js reads env from frontend/ and proxies /api/* to this
 ```
+
+`MAL_CLIENT_ID` is only needed once MAL ingest (F-012) lands.
 
 ### 2. Database
 
 ```bash
 createdb uhnime
+createdb uhnime_test        # used by pytest; never point tests at the dev DB
 psql uhnime -c "CREATE EXTENSION IF NOT EXISTS pg_trgm;"
+psql uhnime_test -c "CREATE EXTENSION IF NOT EXISTS pg_trgm;"
 ```
 
 ### 3. Backend
@@ -109,14 +114,14 @@ npm run dev                      # http://localhost:3000
 ```bash
 cd backend
 uv run python -m ingest.run --source anilist --limit 500   # small dev seed
-uv run python -m jobs.generate_daily --date today
+uv run python -m jobs.generate_daily                        # --date defaults to today (UTC)
 ```
 
 ## Data sources and etiquette
 
 UH-NI-ME uses **official or public APIs and datasets**, not HTML scraping:
 
-- **AniList** (GraphQL API): primary source for titles, synonyms, characters, staff, studios and popularity
+- **AniList** (GraphQL API): primary source for titles, synonyms, characters, studios and popularity
 - **MyAnimeList** (official API v2, needs a client ID): member counts and cross-checks
 - **Wikidata / Wikipedia** (SPARQL / MediaWiki API): structured facts such as studios and air dates
 - **anime-offline-database**: cross-site ID mapping
