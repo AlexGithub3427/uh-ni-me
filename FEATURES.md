@@ -93,11 +93,11 @@ The database does not check that `franchise_id` points at a `franchise` entity; 
 - [x] Deleting an entity removes its aliases, facts and prompt answers; deleting an entity referenced by a submission is rejected
 - [x] `alembic downgrade base` then `upgrade head` runs cleanly
 
-### F-003 · Normalization utility · `todo`
+### F-003 · Normalization utility · `done`
 A single `normalize(text) -> str` in `backend/app/services/normalize.py`.
-- [ ] Lowercase, NFKC, strip punctuation and extra whitespace
-- [ ] Folds macrons and long vowels (`Shōnen`, `Shounen`, `Shonen` all → `shonen`). The fold applies uniformly to every string, English words included (`your` → `yor`); this is fine because aliases and input go through the same function
-- [ ] Unit tests cover at least 15 real title variants, including English titles containing "ou" (e.g. `Your Name`, `Soul Eater`, `Mob Psycho 100`) so the long-vowel fold's effect on them is pinned down by tests
+- [x] Lowercase, NFKC, strip punctuation and whitespace. The match key keeps only letters and digits: all whitespace is removed, not just collapsed, so `Re:Zero`, `Re Zero` and `ReZero` share a key. `×` is treated as `x` (`HUNTER×HUNTER` = `Hunter x Hunter`)
+- [x] Folds macrons and long vowels (`Shōnen`, `Shounen`, `Shonen` all → `shonen`). The fold applies uniformly to every string, English words included (`your` → `yor`); this is fine because aliases and input go through the same function. The long vowels folded are `ou`/`oo` → `o` and `uu` → `u`, within a word only. Other Latin diacritics are dropped too (`Pokémon` → `pokemon`); non-Latin scripts are left as they are
+- [x] Unit tests cover at least 15 real title variants, including English titles containing "ou" (e.g. `Your Name`, `Soul Eater`, `Mob Psycho 100`) so the long-vowel fold's effect on them is pinned down by tests
 
 ---
 
