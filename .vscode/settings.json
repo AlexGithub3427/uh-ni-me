@@ -1,0 +1,6 @@
+{
+  // Use the uv-managed virtualenv, and resolve `app`, `ingest` and `jobs`
+  // as top-level packages the way they run from backend/.
+  "python.defaultInterpreterPath": "${workspaceFolder}/backend/.venv/bin/python",
+  "python.analysis.extraPaths": ["backend"]
+}

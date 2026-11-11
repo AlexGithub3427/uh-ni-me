@@ -8,16 +8,16 @@ The feature specs and roadmap for UH-NI-ME. Each feature has an ID, a status, a 
 
 ## Milestone 0: Foundations
 
-### F-001 · Repo scaffolding · `todo`
+### F-001 · Repo scaffolding · `done`
 Set up the monorepo with `frontend/` (Next.js App Router + TS + Tailwind) and `backend/` (FastAPI + SQLAlchemy + Alembic, managed with uv).
-- [ ] `npm run dev` serves a placeholder home page at :3000
-- [ ] `uv run uvicorn app.main:app` (from `backend/`) serves `GET /api/health` → `{"status": "ok"}`
-- [ ] Ruff and pytest added as uv dev dependencies (`uv add --dev ruff pytest`); ESLint and Prettier configured, with one passing test on each side
-- [ ] Vitest + React Testing Library (jsdom) set up; `npm test` and `npm run test:watch` scripts exist
-- [ ] `docker compose up -d` starts Postgres with the `uhnime` and `uhnime_test` databases, both with `pg_trgm`
-- [ ] `backend/tests/conftest.py` provides the test-DB fixture described in CLAUDE.md "Test setup" (migrate once against `TEST_DATABASE_URL`, roll back per test)
-- [ ] Backend reads config from env vars via a Pydantic settings class, with defaults matching `.env.example`
-- [ ] Next.js rewrites `/api/*` to the backend at `API_URL` (a server-side env var). The browser only ever calls same-origin `/api/...` paths, and the home page calls `/api/health` this way
+- [x] `npm run dev` serves a placeholder home page at :3000
+- [x] `uv run uvicorn app.main:app` (from `backend/`) serves `GET /api/health` → `{"status": "ok"}`
+- [x] Ruff and pytest added as uv dev dependencies (`uv add --dev ruff pytest`); ESLint and Prettier configured, with one passing test on each side
+- [x] Vitest + React Testing Library (jsdom) set up; `npm test` and `npm run test:watch` scripts exist
+- [x] `docker compose up -d` starts Postgres with the `uhnime` and `uhnime_test` databases, both with `pg_trgm`
+- [x] `backend/tests/conftest.py` provides the test-DB fixture described in CLAUDE.md "Test setup" (migrate once against `TEST_DATABASE_URL`, roll back per test)
+- [x] Backend reads config from env vars via a Pydantic settings class, with defaults matching `.env.example`
+- [x] Next.js rewrites `/api/*` to the backend at `API_URL` (a server-side env var). The browser only ever calls same-origin `/api/...` paths, and the home page calls `/api/health` this way
 
 ### F-002 · Database schema · `todo`
 Create SQLAlchemy models and Alembic migrations for the schema below. Conventions: `bigint` identity keys unless noted, `timestamptz` for times, `text` + `CHECK` instead of Postgres enums, and `day` is always a UTC date.
