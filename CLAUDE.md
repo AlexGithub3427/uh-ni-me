@@ -34,6 +34,9 @@ The backend uses [uv](https://docs.astral.sh/uv/) for Python versions, virtualen
 ## Commands
 
 ```bash
+# database (from the repo root)
+docker compose up -d                      # Postgres in Docker: uhnime + uhnime_test
+
 # backend (from backend/)
 uv sync                                   # create/update .venv from uv.lock
 uv run uvicorn app.main:app --reload
@@ -125,7 +128,7 @@ Rules:
 
 ## Test setup
 
-- **Backend:** pytest against a real Postgres database named by `TEST_DATABASE_URL` (default `uhnime_test`). SQLite won't work because matching needs `pg_trgm`. The session fixture in `backend/tests/conftest.py` runs `alembic upgrade head` once. Each test runs inside a transaction that is rolled back afterward, so tests never see each other's data. Never point tests at `DATABASE_URL`.
+- **Backend:** pytest against a real Postgres database named by `TEST_DATABASE_URL` (default `uhnime_test`). Postgres runs in Docker via `docker-compose.yml`; if tests can't connect, run `docker compose up -d` rather than installing Postgres locally. SQLite won't work because matching needs `pg_trgm`. The session fixture in `backend/tests/conftest.py` runs `alembic upgrade head` once. Each test runs inside a transaction that is rolled back afterward, so tests never see each other's data. Never point tests at `DATABASE_URL`.
 - Pure functions (`normalize`, `scoring`) get plain unit tests with no DB fixture.
 - **Frontend:** Vitest + React Testing Library with jsdom. Test files sit next to the code as `*.test.ts(x)`. Mock `lib/api.ts`, not `fetch`.
 

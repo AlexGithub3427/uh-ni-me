@@ -59,6 +59,8 @@ uh-ni-me/
 │   ├── pyproject.toml     # Python deps (uv)
 │   ├── uv.lock
 │   └── .python-version
+├── docker-compose.yml     # local Postgres
+├── docker/postgres/       # database init script
 ├── README.md
 ├── CLAUDE.md              # instructions for AI coding assistants
 ├── FEATURES.md            # feature specs + roadmap
@@ -71,7 +73,7 @@ uh-ni-me/
 
 - Node.js (LTS) and npm
 - [uv](https://docs.astral.sh/uv/) (installs and manages Python 3.13 for the backend)
-- PostgreSQL 15+ (local install or Docker)
+- Docker (runs PostgreSQL 17 with the `pg_trgm` extension)
 
 ### 1. Environment
 
@@ -86,10 +88,15 @@ echo "API_URL=http://localhost:8000" > frontend/.env.local   # Next.js reads env
 ### 2. Database
 
 ```bash
-createdb uhnime
-createdb uhnime_test        # used by pytest; never point tests at the dev DB
-psql uhnime -c "CREATE EXTENSION IF NOT EXISTS pg_trgm;"
-psql uhnime_test -c "CREATE EXTENSION IF NOT EXISTS pg_trgm;"
+docker compose up -d        # Postgres on localhost:5432
+```
+
+The first start creates two databases, `uhnime` (development) and `uhnime_test` (used by pytest; tests never touch the dev DB), and enables `pg_trgm` in both. Useful commands:
+
+```bash
+docker compose exec db psql -U uhnime uhnime   # open a SQL shell
+docker compose down                            # stop; data is kept
+docker compose down -v                         # stop and wipe all data
 ```
 
 ### 3. Backend

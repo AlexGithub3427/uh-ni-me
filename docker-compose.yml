@@ -1,0 +1,24 @@
+# Local development services. Start with: docker compose up -d
+services:
+  db:
+    image: postgres:17
+    container_name: uhnime-db
+    environment:
+      # Local development credentials only; never reuse them in production.
+      POSTGRES_USER: uhnime
+      POSTGRES_PASSWORD: uhnime
+      POSTGRES_DB: uhnime
+    ports:
+      - "5432:5432"
+    volumes:
+      - uhnime-pgdata:/var/lib/postgresql/data
+      # Runs once, when the data volume is first created.
+      - ./docker/postgres/init.sql:/docker-entrypoint-initdb.d/init.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U uhnime -d uhnime"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+volumes:
+  uhnime-pgdata:
