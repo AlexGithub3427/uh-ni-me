@@ -103,14 +103,14 @@ A single `normalize(text) -> str` in `backend/app/services/normalize.py`.
 
 ## Milestone 1: Data pipeline
 
-### F-010 · AniList ingest client · `todo`
+### F-010 · AniList ingest client · `done`
 Fetch anime with titles, synonyms, popularity, average score, start and end dates, airing status, format, genres, relations, studios and characters through the AniList GraphQL API. Staff and voice actors are out of scope (F-014). Scope: fetching and caching raw records only. Writing to the database is F-011.
-- [ ] Fetches the top N anime by popularity, excluding adult-flagged entries (`isAdult`) and the `MUSIC` format
-- [ ] Fetches only characters with a `MAIN` or `SUPPORTING` role
-- [ ] Paginates and backs off on HTTP 429
-- [ ] Caches raw responses to `backend/.cache/anilist/`; a second run with a warm cache makes no network calls
-- [ ] Sends the `INGEST_USER_AGENT` header
-- [ ] Returns typed (Pydantic) source records; tested against fixtures in `backend/tests/fixtures/anilist/`
+- [x] Fetches the top N anime by popularity, excluding adult-flagged entries (`isAdult`) and the `MUSIC` format
+- [x] Fetches only characters with a `MAIN` or `SUPPORTING` role
+- [x] Paginates and backs off on HTTP 429
+- [x] Caches raw responses to `backend/.cache/anilist/`; a second run with a warm cache makes no network calls
+- [x] Sends the `INGEST_USER_AGENT` header
+- [x] Returns typed (Pydantic) source records; tested against fixtures in `backend/tests/fixtures/anilist/`
 
 ### F-011 · Normalizer → knowledge graph · `todo`
 Convert source records into `entity`, `entity_alias` and `fact` rows, and wire up the `ingest.run` CLI.
@@ -304,3 +304,8 @@ Tailwind theme tokens (colors, type, spacing), with light and dark mode.
 - Tune after playtesting: rarity cutoffs (F-033), `MATCH_SIMILARITY_THRESHOLD` (0.4 for now) and `MAX_GUESSES_PER_PROMPT` (20 for now).
 - Visual identity (F-043): palette, fonts, tier colors and share emoji. Decide before M4.
 - Hosting: Vercel (frontend) + Fly/Render/Railway (API + Postgres)? Decide before deploying.
+- Catalogue size: how many anime should production hold (`--limit`)? Only the 500-anime dev seed is defined. Decide before the first production ingest, once prompts exist and their answer counts can be checked.
+- Ingest cache expiry: the F-010 cache never expires, so a scheduled ingest with a warm cache fetches nothing new. Add a max age or a `--refresh` flag (`TODO(F-011)` in `ingest/anilist.py`). Until then, delete `backend/.cache/anilist/` to refetch. Decide before scheduling the ingest.
+- Ingest refresh schedule: how often to refetch, and whether to refresh the most popular anime more often than the long tail. AniList allows 30 requests per minute, so a large catalogue takes hours. Depends on catalogue size; measure a full run first. Decide before scheduling the ingest.
+- Anime that fall out of the top N are no longer refetched, and their rows stay as last ingested. Revisit after launch if stale entries show up.
+- Where the scheduled jobs run (ingest and the daily puzzle job), and which feature covers setting that up. Decide with hosting.
