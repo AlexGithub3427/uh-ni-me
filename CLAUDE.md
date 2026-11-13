@@ -63,7 +63,7 @@ Everything is a small knowledge graph. Don't add one-off tables for new question
 
 The full column-level schema is in `FEATURES.md` under F-002. Summary:
 
-- `entity`: anime, character, studio or franchise (`kind`, `canonical_name`, `popularity`, the anime-only columns `score`, `start_year` and `end_year` (a NULL `end_year` means still airing), `anilist_id` / `mal_id` / `wikidata_id`, `franchise_id` → the franchise entity an anime belongs to). A franchise entity carries the aliases of all its member anime. Staff and voice actors are out of scope for now (F-014).
+- `entity`: anime, character, studio or franchise (`kind`, `canonical_name`, `popularity`, the anime-only columns `score`, `episodes`, `start_year` and `end_year` (a NULL `end_year` means still airing), `anilist_id` / `mal_id` / `wikidata_id`, `franchise_id` → the franchise entity an anime belongs to). A franchise entity carries the aliases of all its member anime. Staff and voice actors are out of scope for now (F-014).
 - `entity_alias`: every name a player might type; `normalized` is the match key
 - `fact`: `(subject_id, predicate, object_id | value, source)`, e.g. `(Mob Psycho 100, produced_by, Bones)`. Predicates point from the answer outward, so a prompt's answers are always fact *subjects* (`appears_in` is character → anime).
 - `prompt_template` (`slug`, `answer_kind`, `query_def`) → `prompt` → `prompt_answer` (precomputed valid answers with `base_rarity`, `times_answered`)

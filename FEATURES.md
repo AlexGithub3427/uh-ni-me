@@ -28,7 +28,8 @@ entity
   canonical_name text, popularity int
   start_year int NULL, end_year int NULL          -- anime only; end_year NULL = still airing
   score int NULL CHECK (0–100)                    -- anime only: average score
-  CHECK ((start_year IS NULL AND end_year IS NULL AND score IS NULL) OR kind = 'anime')
+  episodes int NULL                               -- anime only: episode count (F-015)
+  CHECK ((start_year IS NULL AND end_year IS NULL AND score IS NULL AND episodes IS NULL) OR kind = 'anime')
   CHECK (end_year IS NULL OR (start_year IS NOT NULL AND end_year >= start_year))
   anilist_id int NULL, mal_id int NULL, wikidata_id text NULL
   franchise_id NULL → entity.id                   -- anime only: the franchise entity it belongs to
@@ -135,13 +136,13 @@ Enrich entities with facts from Wikidata (e.g. original creator, source material
 ### F-014 · Staff and voice actors · `later`
 Add `staff` as an entity kind, a `voiced_by` predicate (character → staff) and the `Name a character voiced by {voice_actor}` template.
 
-### F-015 · AniList tags, source material and episode counts · `todo`
+### F-015 · AniList tags, source material and episode counts · `done`
 Extend the AniList client (F-010) and the normalizer (F-011) with three more fields. Ingest only: the templates that use them are seeded in F-020.
-- [ ] The client also fetches `tags` (name, rank, spoiler and adult flags), `source` and `episodes`; fixtures updated
-- [ ] `tag` predicate (anime → value): one fact per tag whose rank is at least `TAG_MIN_RANK` (default 60, in `.env.example`). Spoiler tags (general or for that anime) and adult tags are skipped
-- [ ] `source_material` predicate (anime → value) holds AniList's `source` (`ORIGINAL`, `MANGA`, `LIGHT_NOVEL`, `VIDEO_GAME`, `VISUAL_NOVEL`, ...). No fact when AniList has none. It is not named `source` because `fact.source` already means the data source
-- [ ] `entity.episodes` (int NULL, anime only) holds AniList `episodes`, added by a migration and to the F-002 schema listing. The anime-only `CHECK` on `entity` is extended to cover it. It is a column and not a fact because prompts compare it numerically
-- [ ] Re-running stays idempotent, and a tag or source removed upstream disappears on the next run
+- [x] The client also fetches `tags` (name, rank, spoiler and adult flags), `source` and `episodes`; fixtures updated
+- [x] `tag` predicate (anime → value): one fact per tag whose rank is at least `TAG_MIN_RANK` (default 60, in `.env.example`). Spoiler tags (general or for that anime) and adult tags are skipped
+- [x] `source_material` predicate (anime → value) holds AniList's `source` (`ORIGINAL`, `MANGA`, `LIGHT_NOVEL`, `VIDEO_GAME`, `VISUAL_NOVEL`, ...). No fact when AniList has none. It is not named `source` because `fact.source` already means the data source
+- [x] `entity.episodes` (int NULL, anime only) holds AniList `episodes`, added by a migration and to the F-002 schema listing. The anime-only `CHECK` on `entity` is extended to cover it. It is a column and not a fact because prompts compare it numerically
+- [x] Re-running stays idempotent, and a tag or source removed upstream disappears on the next run
 
 ---
 

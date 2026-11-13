@@ -1,4 +1,4 @@
-"""Normalizer: AniList source records → the knowledge graph (F-011).
+"""Normalizer: AniList source records → the knowledge graph (F-011, F-015).
 
 Turns the records fetched by ``ingest.anilist`` into ``entity``, ``entity_alias``
 and ``fact`` rows. Running it again upserts: entities are keyed by
@@ -13,9 +13,10 @@ from sqlalchemy import and_, delete, or_
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.orm import Session
 
+from app.config import get_settings
 from app.models import Entity, EntityAlias, Fact
 from app.services.normalize import normalize
-from ingest.anilist import AniListAnime, AniListCharacter, AniListStudio
+from ingest.anilist import AniListAnime, AniListCharacter, AniListStudio, AniListTag
 
 SOURCE = "anilist"
 
@@ -34,8 +35,15 @@ _EntityKey = tuple[str, int]
 _FactKey = tuple[_EntityKey, str, _EntityKey | None, str | None]
 
 
-def upsert_anilist(session: Session, records: Sequence[AniListAnime]) -> None:
-    """Upsert the entities, aliases and facts for ``records``. The caller commits."""
+def upsert_anilist(
+    session: Session, records: Sequence[AniListAnime], *, tag_min_rank: int | None = None
+) -> None:
+    """Upsert the entities, aliases and facts for ``records``. The caller commits.
+
+    ``tag_min_rank`` defaults to the ``TAG_MIN_RANK`` setting.
+    """
+    if tag_min_rank is None:
+        tag_min_rank = get_settings().tag_min_rank
     anime = {record.id: record for record in records if _anime_names(record)}
     studios: dict[int, AniListStudio] = {}
     characters: dict[int, AniListCharacter] = {}
@@ -47,6 +55,12 @@ def upsert_anilist(session: Session, records: Sequence[AniListAnime]) -> None:
             facts.add((subject, "format", None, record.format))
         for genre in record.genres:
             facts.add((subject, "genre", None, genre))
+        for tag in record.tags:
+            if _tag_applies(tag, tag_min_rank):
+                facts.add((subject, "tag", None, tag.name))
+        if record.source:
+            # Not named "source": fact.source already means the data source.
+            facts.add((subject, "source_material", None, record.source))
         for studio in record.studios:
             # AniList also lists licensors and publishers; they did not make the anime.
             if studio.is_animation_studio:
@@ -90,6 +104,7 @@ def upsert_anilist(session: Session, records: Sequence[AniListAnime]) -> None:
                 "start_year": start_year,
                 "end_year": end_year,
                 "score": record.average_score,
+                "episodes": record.episodes,
                 "franchise_id": entity_ids["franchise", root_of[record.id]],
             }
         )
@@ -141,6 +156,13 @@ def _anime_names(record: AniListAnime) -> list[str]:
 def _character_names(character: AniListCharacter) -> list[str]:
     name = character.name
     return _usable([name.full, name.native, *name.alternative])
+
+
+def _tag_applies(tag: AniListTag, min_rank: int) -> bool:
+    """Ranked at least ``min_rank``, and neither a spoiler (in general or here) nor adult."""
+    if tag.is_general_spoiler or tag.is_media_spoiler or tag.is_adult:
+        return False
+    return tag.rank is not None and tag.rank >= min_rank
 
 
 def _years(record: AniListAnime) -> tuple[int | None, int | None]:

@@ -1,8 +1,9 @@
 """AniList GraphQL client (F-010).
 
-Fetches the most popular anime with their relations, studios and characters, and
-caches every raw response on disk. Scope is fetching only: turning these records
-into entities, aliases and facts is the normalizer's job (F-011).
+Fetches the most popular anime with their relations, studios, characters, tags,
+source material and episode counts (F-015), and caches every raw response on
+disk. Scope is fetching only: turning these records into entities, aliases and
+facts is the normalizer's job (F-011).
 """
 
 import hashlib
@@ -54,6 +55,9 @@ query ($page: Int, $perPage: Int, $isAdult: Boolean, $formatNot: MediaFormat) {
       status
       format
       genres
+      tags { name rank isGeneralSpoiler isMediaSpoiler isAdult }
+      source(version: 3)
+      episodes
       relations { edges { relationType node { id type format } } }
       studios { edges { isMain node { id name favourites isAnimationStudio } } }
       characters(sort: [ROLE, RELEVANCE, ID], page: 1, perPage: __PER_PAGE__) {__CHARACTERS__      }
@@ -132,6 +136,14 @@ class AniListCharacter(_Record):
     role: str  # MAIN or SUPPORTING
 
 
+class AniListTag(_Record):
+    name: str
+    rank: int | None = None  # 0-100: how strongly the tag applies to this anime
+    is_general_spoiler: bool = False  # the tag is a spoiler for any anime
+    is_media_spoiler: bool = False  # the tag is a spoiler for this anime
+    is_adult: bool = False
+
+
 class AniListAnime(_Record):
     id: int
     id_mal: int | None = None
@@ -144,9 +156,17 @@ class AniListAnime(_Record):
     status: str | None = None  # FINISHED, RELEASING, NOT_YET_RELEASED, CANCELLED, HIATUS
     format: str | None = None  # TV, MOVIE, OVA, ...
     genres: list[str] = []
+    tags: list[AniListTag] = []
+    source: str | None = None  # ORIGINAL, MANGA, LIGHT_NOVEL, VIDEO_GAME, ...
+    episodes: int | None = None
     relations: list[AniListRelation] = []
     studios: list[AniListStudio] = []
     characters: list[AniListCharacter] = []
+
+    @field_validator("tags", mode="before")
+    @classmethod
+    def _null_is_empty(cls, value: Any) -> Any:
+        return value or []
 
     @field_validator("relations", "studios", "characters", mode="before")
     @classmethod

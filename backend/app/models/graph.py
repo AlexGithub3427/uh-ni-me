@@ -21,6 +21,7 @@ class Entity(Base):
     start_year: Mapped[int | None]
     end_year: Mapped[int | None]
     score: Mapped[int | None]
+    episodes: Mapped[int | None]
     anilist_id: Mapped[int | None]
     mal_id: Mapped[int | None]
     wikidata_id: Mapped[str | None]
@@ -33,7 +34,8 @@ class Entity(Base):
     __table_args__ = (
         check_in("kind", ENTITY_KINDS),
         CheckConstraint(
-            "(start_year IS NULL AND end_year IS NULL AND score IS NULL) OR kind = 'anime'",
+            "(start_year IS NULL AND end_year IS NULL AND score IS NULL AND episodes IS NULL) "
+            "OR kind = 'anime'",
             name="anime_only_fields",
         ),
         CheckConstraint(

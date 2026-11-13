@@ -1,11 +1,13 @@
-"""F-011: AniList source records → entity, entity_alias and fact rows, and the ingest CLI."""
+"""F-011 and F-015: AniList source records → entity, entity_alias and fact rows, and the CLI."""
 
 from pathlib import Path
 from typing import Any
 
+import pytest
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
+from app.config import Settings
 from app.models import Entity, EntityAlias, Fact
 from app.services.normalize import normalize
 from ingest import run
@@ -40,6 +42,10 @@ def studio(id: int, name: str, **fields: Any) -> dict[str, Any]:
 
 def character(id: int, full: str, **fields: Any) -> dict[str, Any]:
     return {"id": id, "name": {"full": full}, "favourites": 5, "role": "MAIN"} | fields
+
+
+def tag(name: str, rank: int | None = 80, **flags: bool) -> dict[str, Any]:
+    return {"name": name, "rank": rank} | flags
 
 
 def entity(session: Session, kind: str, anilist_id: int) -> Entity:
@@ -111,6 +117,8 @@ def test_f011_writes_produced_by_format_genre_and_appears_in_facts(
         "appears_in",
         "format",
         "genre",
+        "tag",
+        "source_material",
     }
 
 
@@ -431,6 +439,179 @@ def test_f011_fact_that_disappears_upstream_is_removed(db_session: Session) -> N
     dimple = entity(db_session, "character", 101)
     assert facts(db_session, dimple, "appears_in") == {("anime", 2)}
     assert facts(db_session, entity(db_session, "character", 100), "appears_in") == {("anime", 1)}
+
+
+# --- F-015: tags, source material and episode counts -------------------------
+
+
+def test_f015_writes_a_tag_fact_for_each_tag_at_or_above_the_min_rank(
+    db_session: Session,
+) -> None:
+    record = make_anime(1, tags=[tag("Isekai", 61), tag("Mecha", 60), tag("Time Travel", 59)])
+
+    upsert_anilist(db_session, [record], tag_min_rank=60)
+
+    assert facts(db_session, entity(db_session, "anime", 1), "tag") == {"Isekai", "Mecha"}
+
+
+def test_f015_tag_min_rank_is_configurable(db_session: Session) -> None:
+    record = make_anime(1, tags=[tag("Isekai", 90), tag("Mecha", 75)])
+
+    upsert_anilist(db_session, [record], tag_min_rank=80)
+
+    assert facts(db_session, entity(db_session, "anime", 1), "tag") == {"Isekai"}
+
+
+def test_f015_tag_min_rank_defaults_to_the_setting(
+    db_session: Session, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    assert Settings(_env_file=None).tag_min_rank == 60
+    monkeypatch.setattr(
+        "ingest.normalizer.get_settings", lambda: Settings(_env_file=None, tag_min_rank=80)
+    )
+    record = make_anime(1, tags=[tag("Isekai", 90), tag("Mecha", 75)])
+
+    upsert_anilist(db_session, [record])
+
+    assert facts(db_session, entity(db_session, "anime", 1), "tag") == {"Isekai"}
+
+
+def test_f015_skips_spoiler_adult_and_unranked_tags(db_session: Session) -> None:
+    record = make_anime(
+        1,
+        tags=[
+            tag("Sports", 95),
+            tag("Tragedy", 95, is_general_spoiler=True),
+            tag("Henshin", 95, is_media_spoiler=True),
+            tag("Nudity", 95, is_adult=True),
+            tag("Unranked", None),
+        ],
+    )
+
+    upsert_anilist(db_session, [record], tag_min_rank=60)
+
+    assert facts(db_session, entity(db_session, "anime", 1), "tag") == {"Sports"}
+
+
+def test_f015_tag_facts_from_recorded_data(db_session: Session, tmp_path: Path) -> None:
+    upsert_anilist(db_session, fixture_records(tmp_path), tag_min_rank=60)
+
+    # 29 tags upstream: 8 are spoilers and 4 more rank below 60.
+    assert facts(db_session, entity(db_session, "anime", ATTACK_ON_TITAN), "tag") == {
+        "Kaiju",
+        "Revenge",
+        "Military",
+        "Male Protagonist",
+        "Primarily Teen Cast",
+        "Post-Apocalyptic",
+        "Survival",
+        "Gore",
+        "Steampunk",
+        "Dystopian",
+        "Swordplay",
+        "Ensemble Cast",
+        "Orphan",
+        "Shounen",
+        "Kuudere",
+        "Medieval",
+        "Coming of Age",
+    }
+    assert set(db_session.scalars(select(Fact.source).where(Fact.predicate == "tag"))) == {
+        "anilist"
+    }
+
+
+def test_f015_source_material_holds_the_anilist_source(db_session: Session, tmp_path: Path) -> None:
+    records = [
+        *fixture_records(tmp_path),
+        make_anime(1, source="ORIGINAL"),
+        make_anime(2, source="LIGHT_NOVEL"),
+        make_anime(3, source=None),
+    ]
+
+    upsert_anilist(db_session, records)
+
+    def source_material(anilist_id: int) -> set[Any]:
+        return facts(db_session, entity(db_session, "anime", anilist_id), "source_material")
+
+    assert source_material(ATTACK_ON_TITAN) == {"MANGA"}
+    assert source_material(1) == {"ORIGINAL"}
+    assert source_material(2) == {"LIGHT_NOVEL"}
+    assert source_material(3) == set()
+    # `fact.source` still means the data source, not the source material.
+    assert set(db_session.scalars(select(Fact.source))) == {"anilist"}
+
+
+def test_f015_episodes_is_the_anilist_episode_count_or_null(
+    db_session: Session, tmp_path: Path
+) -> None:
+    upsert_anilist(
+        db_session, [*fixture_records(tmp_path), make_anime(1), make_anime(2, episodes=1)]
+    )
+
+    assert entity(db_session, "anime", ATTACK_ON_TITAN).episodes == 25
+    assert entity(db_session, "anime", DEMON_SLAYER).episodes == 26
+    assert entity(db_session, "anime", 1).episodes is None
+    assert entity(db_session, "anime", 2).episodes == 1
+    others = db_session.scalars(select(Entity).where(Entity.kind != "anime")).all()
+    assert {e.kind for e in others} == {"character", "studio", "franchise"}
+    assert all(e.episodes is None for e in others)
+
+
+def test_f015_rerun_creates_no_duplicates(db_session: Session, tmp_path: Path) -> None:
+    records = fixture_records(tmp_path)
+    upsert_anilist(db_session, records)
+    before = counts(db_session)
+    assert db_session.scalar(select(func.count()).where(Fact.predicate == "tag"))
+
+    upsert_anilist(db_session, records)
+
+    assert counts(db_session) == before
+
+
+def test_f015_tag_or_source_removed_upstream_disappears_on_rerun(db_session: Session) -> None:
+    upsert_anilist(
+        db_session,
+        [
+            make_anime(
+                1,
+                source="MANGA",
+                episodes=12,
+                tags=[tag("Isekai", 90), tag("Mecha", 80), tag("Sports", 70)],
+            )
+        ],
+        tag_min_rank=60,
+    )
+    anime = entity(db_session, "anime", 1)
+    # Another source's fact must survive AniList dropping the same tag.
+    db_session.add(Fact(subject_id=anime.id, predicate="tag", value="Mecha", source="mal"))
+    db_session.flush()
+
+    # Mecha is gone, Sports fell below the cutoff, and the source and episodes were cleared.
+    upsert_anilist(
+        db_session,
+        [make_anime(1, tags=[tag("Isekai", 90), tag("Sports", 40)])],
+        tag_min_rank=60,
+    )
+    db_session.expire_all()
+
+    tag_sources = db_session.execute(
+        select(Fact.value, Fact.source).where(Fact.subject_id == anime.id, Fact.predicate == "tag")
+    ).all()
+    assert set(tag_sources) == {("Isekai", "anilist"), ("Mecha", "mal")}
+    assert facts(db_session, anime, "source_material") == set()
+    assert entity(db_session, "anime", 1).episodes is None
+
+
+def test_f015_rerun_updates_a_changed_source_and_episode_count(db_session: Session) -> None:
+    upsert_anilist(db_session, [make_anime(1, source="OTHER", episodes=12)])
+
+    upsert_anilist(db_session, [make_anime(1, source="WEB_NOVEL", episodes=24)])
+    db_session.expire_all()
+
+    anime = entity(db_session, "anime", 1)
+    assert facts(db_session, anime, "source_material") == {"WEB_NOVEL"}
+    assert anime.episodes == 24
 
 
 # --- CLI ---------------------------------------------------------------------

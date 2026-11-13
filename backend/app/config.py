@@ -26,6 +26,7 @@ class Settings(BaseSettings):
     # Ingest
     ingest_user_agent: str = "uh-ni-me/0.1 (+https://github.com/YOUR_USERNAME/uh-ni-me)"
     mal_client_id: str = ""
+    tag_min_rank: int = 60
 
     # Answer matching
     match_similarity_threshold: float = 0.4

@@ -142,6 +142,7 @@ def test_f002_only_the_columns_marked_null_are_nullable(db_session: Session) -> 
         ("entity", "start_year"),
         ("entity", "end_year"),
         ("entity", "score"),
+        ("entity", "episodes"),
         ("entity", "anilist_id"),
         ("entity", "mal_id"),
         ("entity", "wikidata_id"),
@@ -252,7 +253,7 @@ def test_f002_rejects_unknown_entity_kind(db_session: Session) -> None:
     )
 
 
-@pytest.mark.parametrize("field", ["start_year", "end_year", "score"])
+@pytest.mark.parametrize("field", ["start_year", "end_year", "score", "episodes"])
 def test_f002_rejects_anime_only_fields_on_other_kinds(db_session: Session, field: str) -> None:
     values = {"start_year": 2010} if field == "end_year" else {}
     assert_rejected(
@@ -265,6 +266,19 @@ def test_f002_rejects_anime_only_fields_on_other_kinds(db_session: Session, fiel
         **values,
         **{field: 50 if field == "score" else 2011},
     )
+
+
+def test_f015_anime_has_a_nullable_integer_episode_count(db_session: Session) -> None:
+    column_type = db_session.scalar(
+        text(
+            "SELECT data_type FROM information_schema.columns "
+            "WHERE table_name = 'entity' AND column_name = 'episodes'"
+        )
+    )
+
+    assert column_type == "integer"
+    assert make_entity(db_session, episodes=25)["episodes"] == 25
+    assert make_entity(db_session)["episodes"] is None
 
 
 def test_f002_rejects_end_year_before_start_year(db_session: Session) -> None:

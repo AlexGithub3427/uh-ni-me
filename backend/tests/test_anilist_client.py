@@ -374,3 +374,50 @@ def test_f010_accepts_missing_optional_fields() -> None:
     assert anime.start_date.year is None
     assert anime.format is None
     assert anime.characters == []
+
+
+# --- F-015: tags, source material and episode counts -------------------------
+
+
+def test_f015_requests_tags_source_and_episodes(tmp_path: Path) -> None:
+    api = FakeAniList()
+
+    _client(api, tmp_path).fetch_top_anime(1)
+
+    query = json.loads(api.requests[0].content)["query"]
+    assert "tags { name rank isGeneralSpoiler isMediaSpoiler isAdult }" in query
+    # Version 3 of the enum tells WEB_NOVEL, GAME, ... apart from OTHER.
+    assert "source(version: 3)" in query
+    assert "episodes" in query
+
+
+def test_f015_returns_tags_source_and_episodes(tmp_path: Path) -> None:
+    titan, slayer = _client(FakeAniList(), tmp_path).fetch_top_anime(2)
+
+    assert (titan.source, titan.episodes) == ("MANGA", 25)
+    assert (slayer.source, slayer.episodes) == ("MANGA", 26)
+
+    assert len(titan.tags) == 29
+    tags = {tag.name: tag for tag in titan.tags}
+    kaiju = tags["Kaiju"]
+    assert (kaiju.rank, kaiju.is_general_spoiler, kaiju.is_media_spoiler, kaiju.is_adult) == (
+        93,
+        False,
+        False,
+        False,
+    )
+    # Recorded data has both kinds of spoiler flag.
+    assert tags["Time Skip"].is_general_spoiler is True
+    assert tags["Time Skip"].is_media_spoiler is False
+    assert tags["Henshin"].is_general_spoiler is False
+    assert tags["Henshin"].is_media_spoiler is True
+
+
+def test_f015_accepts_missing_tags_source_and_episodes() -> None:
+    anime = AniListAnime.model_validate(
+        {"id": 1, "title": {"romaji": "X"}, "tags": None, "source": None, "episodes": None}
+    )
+
+    assert anime.tags == []
+    assert anime.source is None
+    assert anime.episodes is None
