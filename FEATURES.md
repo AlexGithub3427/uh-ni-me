@@ -112,19 +112,19 @@ Fetch anime with titles, synonyms, popularity, average score, start and end date
 - [x] Sends the `INGEST_USER_AGENT` header
 - [x] Returns typed (Pydantic) source records; tested against fixtures in `backend/tests/fixtures/anilist/`
 
-### F-011 · Normalizer → knowledge graph · `todo`
+### F-011 · Normalizer → knowledge graph · `done`
 Convert source records into `entity`, `entity_alias` and `fact` rows, and wire up the `ingest.run` CLI.
-- [ ] Predicates: `produced_by` (anime → studio), `appears_in` (character → anime), `format` (anime → value), `genre` (anime → value). Every fact has `source = 'anilist'`
-- [ ] `entity.start_year` and `end_year` come from the anime's start and end dates (never set for characters or studios). `end_year` is NULL only while the anime is still airing; a finished anime with no end date gets `end_year = start_year`
-- [ ] `entity.popularity` is AniList `popularity` for anime and `favourites` for characters and studios
-- [ ] `entity.score` is AniList `averageScore` for anime (null when AniList has none; never set for other kinds)
-- [ ] Every title variant (English, romaji, native, synonyms) becomes an alias
-- [ ] Every anime belongs to exactly one `franchise` entity via `franchise_id`. Anime linked by sequel, prequel, parent or side-story relations share a franchise; a standalone anime gets a franchise of its own
-- [ ] A franchise entity is built from its members. Its root is the member with the earliest `start_year` (ties → lowest `anilist_id`). `canonical_name` is the root's name, `anilist_id` is the root's `anilist_id` (the upsert key, unique within `kind = 'franchise'`), `popularity` is the highest member popularity, and its aliases are the union of all members' aliases
-- [ ] Known limitation: if a later ingest finds an earlier root, the franchise is re-keyed and its answer history is lost. `TODO(F-011)` if this shows up in practice
-- [ ] `uv run python -m ingest.run --source anilist --limit N` fetches (F-010) and upserts
-- [ ] Re-running it upserts entities by `(kind, anilist_id)` and creates no duplicate entities, aliases or facts
-- [ ] A fact that disappears upstream is removed on the next run (facts are replaced per subject and source)
+- [x] Predicates: `produced_by` (anime → studio), `appears_in` (character → anime), `format` (anime → value), `genre` (anime → value). Every fact has `source = 'anilist'`. `produced_by` covers AniList's animation studios only (`isAnimationStudio`), main or not; licensors and publishers get no studio entity
+- [x] `entity.start_year` and `end_year` come from the anime's start and end dates (never set for characters or studios). `end_year` is NULL only while the anime is still airing; a finished anime with no end date gets `end_year = start_year`
+- [x] `entity.popularity` is AniList `popularity` for anime and `favourites` for characters and studios
+- [x] `entity.score` is AniList `averageScore` for anime (null when AniList has none; never set for other kinds)
+- [x] Every title variant (English, romaji, native, synonyms) becomes an alias; characters get their full, native and alternative names. `canonical_name` is the first available of English, romaji, native (characters: full, native). Names with an empty match key are skipped. Ingest only adds aliases and never removes them, because `entity_alias` has no `source`
+- [x] Every anime belongs to exactly one `franchise` entity via `franchise_id`. Anime linked by sequel, prequel, parent or side-story relations share a franchise; a standalone anime gets a franchise of its own. Two fetched anime that both link to the same unfetched anime also share a franchise
+- [x] A franchise entity is built from its members. Its root is the member with the earliest `start_year` (ties → lowest `anilist_id`). `canonical_name` is the root's name, `anilist_id` is the root's `anilist_id` (the upsert key, unique within `kind = 'franchise'`), `popularity` is the highest member popularity, and its aliases are the union of all members' aliases
+- [x] Known limitation: if a later ingest finds an earlier root, the franchise is re-keyed and its answer history is lost. `TODO(F-011)` if this shows up in practice
+- [x] `uv run python -m ingest.run --source anilist --limit N` fetches (F-010) and upserts
+- [x] Re-running it upserts entities by `(kind, anilist_id)` and creates no duplicate entities, aliases or facts
+- [x] A fact that disappears upstream is removed on the next run (facts are replaced per subject and source). An anime's record owns its own facts and the `appears_in` facts pointing at it, so a character keeps its facts about anime that were not refetched
 
 ### F-012 · MAL + ID cross-mapping · `later`
 Add MyAnimeList member counts and use anime-offline-database to map IDs across sites. The "top N" templates (F-020) use AniList numbers until then and may switch to MAL here.
@@ -135,46 +135,104 @@ Enrich entities with facts from Wikidata (e.g. original creator, source material
 ### F-014 · Staff and voice actors · `later`
 Add `staff` as an entity kind, a `voiced_by` predicate (character → staff) and the `Name a character voiced by {voice_actor}` template.
 
+### F-015 · AniList tags, source material and episode counts · `todo`
+Extend the AniList client (F-010) and the normalizer (F-011) with three more fields. Ingest only: the templates that use them are seeded in F-020.
+- [ ] The client also fetches `tags` (name, rank, spoiler and adult flags), `source` and `episodes`; fixtures updated
+- [ ] `tag` predicate (anime → value): one fact per tag whose rank is at least `TAG_MIN_RANK` (default 60, in `.env.example`). Spoiler tags (general or for that anime) and adult tags are skipped
+- [ ] `source_material` predicate (anime → value) holds AniList's `source` (`ORIGINAL`, `MANGA`, `LIGHT_NOVEL`, `VIDEO_GAME`, `VISUAL_NOVEL`, ...). No fact when AniList has none. It is not named `source` because `fact.source` already means the data source
+- [ ] `entity.episodes` (int NULL, anime only) holds AniList `episodes`, added by a migration and to the F-002 schema listing. The anime-only `CHECK` on `entity` is extended to cover it. It is a column and not a fact because prompts compare it numerically
+- [ ] Re-running stays idempotent, and a tag or source removed upstream disappears on the next run
+
 ---
 
 ## Milestone 2: Prompts
 
 ### F-020 · Prompt templates · `todo`
-Seed the starter templates below, each with a `query_def`. The project owner writes any further templates; don't invent new ones.
-- `Name an anime produced by {studio}`
-- `Name an anime airing in {year}`
+Seed the templates below, each with a `query_def`. The project owner writes any further templates; don't invent new ones.
+
+Anime answers (`answer_kind = anime`):
+- `Name an anime by {studio}`
+- `Name an anime that aired in {year}`
+- `Name an anime that premiered in {year}` (stricter than "aired in": a long-runner counts only in its first year)
 - `Name an anime in the top {25|50|100|250|500} most popular anime`
 - `Name an anime in the top {25|50|100|250|500} highest rated anime`
+- `Name a {genre} anime`
+- `Name a {genre} and {genre} anime`
 - `Name a {genre} anime airing in the {decade}s`
+- `Name a {genre} anime by {studio}`
+- `Name a {studio} anime from the {decade}s`
+- `Name an anime in the top {25|50|100} most popular {genre} anime` (ranked within the genre, using `within`)
+- `Name an anime from the top {25|50|100|250} highest rated {decade}'s anime` (ranked within the decade, using `within` with `airing_between`)
+- `Name an anime movie from the {decade}s`
+- `Name a {genre} anime movie`
+- `Name an anime movie by {studio}`
+- `Name an anime rated {80|85}+`
+- `Name an anime rated below {60|65}`
+- `Name an anime currently airing`
+- `Name an anime that ran for {3|5|10}+ years`
+
+Franchise answers (`answer_kind = franchise`):
+- `Name a franchise with an anime movie`
+- `Name a franchise with an anime by {studio}`
+- `Name a franchise with an anime that aired in the {decade}s`
+- `Name a franchise with {3|5|10}+ anime`
+
+Character answers (`answer_kind = character`):
 - `Name a character from {anime}`
+- `Name a character from the {franchise} franchise`
+- `Name a character from a {studio} anime`
+- `Name a character from an anime that aired in {year}`
+- `Name one of the top {25|50|100|250} most favourited characters`
 
+Anime answers that use the F-015 data (`answer_kind = anime`):
+- `Name a {tag} anime` (e.g. isekai, time travel, mecha, sports)
+- `Name an original anime`
+- `Name an anime adapted from a {manga|light novel|video game|visual novel}`
+- `Name an anime with {100|200}+ episodes`
+- `Name a TV anime with 13 or fewer episodes` (`format = TV` only, so movies, OVAs, ONAs, specials and TV shorts are not answers)
 
-A `query_def` is a JSON object with a `where` list of AND-ed conditions. The answers are the entities of the template's `answer_kind` that satisfy all of them. When `answer_kind` is `franchise`, the conditions are tested against the franchise's member anime, and a franchise is an answer if at least one member satisfies all of them. `"$name"` refers to a prompt param. Five condition types:
+A `query_def` is a JSON object with a `where` list of AND-ed conditions. The answers are the entities of the template's `answer_kind` that satisfy all of them. When `answer_kind` is `franchise`, the conditions are tested against the franchise's member anime, and a franchise is an answer if at least one member satisfies all of them (`min_members` is the exception: it tests the franchise itself). `"$name"` refers to a prompt param. Eight condition types:
 
 ```json
 {
   "where": [
     { "predicate": "produced_by", "object": "$studio" },
     { "predicate": "format", "value": "MOVIE" },
+    { "predicate": "appears_in", "object_where": [{ "predicate": "produced_by", "object": "$studio" }] },
     { "field": "start_year", "between": ["$from", "$to"] },
     { "airing_between": ["$from", "$to"] },
-    { "top": "$n", "by": "popularity" }
+    { "ran_for": "$years", "as_of": "$year" },
+    { "top": "$n", "by": "popularity" },
+    { "top": "$n", "by": "popularity", "within": [{ "predicate": "genre", "value": "$genre" }] },
+    { "min_members": "$n" }
   ]
 }
 ```
 
 - `predicate` + `object`: the answer is the subject of a fact whose object is that entity
 - `predicate` + `value`: the answer is the subject of a fact with that literal value
-- `field` + `eq` or `between`: a condition on an `entity` column (`start_year` or `end_year`)
+- `predicate` + `object_where`: the answer is the subject of a fact whose object satisfies every condition in the nested list. The nested list takes the same condition types, tested against the object entity, except `top`, `min_members` and another `object_where` (one level of nesting only). "A character from a {studio} anime" is the example above
+- `field` + one of `eq`, `between`, `gte`, `lte`, `is_null`: a condition on an `entity` column (`start_year`, `end_year`, `score`, `episodes` or `franchise_id`; `franchise_id` takes `eq` only). `between` is inclusive. `is_null` takes `true` or `false`. A NULL column fails every operator except `is_null: true`. Scores are whole numbers, so "rated below 60" is `lte: 59`
 - `airing_between`: the anime was airing at some point in the range, i.e. `start_year <= to` and (`end_year >= from` or `end_year` is NULL). "Airing in the 2000s" is `[2000, 2009]`; "airing in 2005" is `[2005, 2005]`
+- `ran_for` + `as_of`: the anime spans at least that many years, i.e. `coalesce(end_year, as_of) - start_year >= years`. `as_of` is the year the prompt was generated and stands in for the end of an anime that is still airing. It compares calendar years, so it is approximate. An anime with no `start_year` never qualifies
 - `top` + `by`: the answer is among the N highest-ranked entities of the answer kind by `popularity` or `score`. Entities with a NULL value are unranked; ties go to the higher popularity, then the lower id. The ranking is taken over all entities of that kind first, and any other conditions then filter the result
+- `top` + `by` + `within`: the same, but the ranking is taken only over the entities of the answer kind that satisfy every condition in the `within` list, so "the top 25 most popular {genre} anime" is the example above. If fewer than N entities satisfy `within`, all of the ranked ones are answers. The `within` list takes the same condition types except `top` and `min_members`. Conditions outside `within` still filter the result afterwards
+- `min_members`: the franchise has at least N member anime, of any format. Valid only when `answer_kind` is `franchise`
+
+"Currently airing" is `end_year` `is_null: true` plus `start_year` `lte: "$year"`, where `$year` is the year the prompt was generated. The second condition excludes anime that have not started yet, which also have a NULL `end_year`.
 
 - [ ] One interpreter turns any `query_def` plus params into the list of answer entities; no per-template query code
-- [ ] An unknown condition type, predicate or field raises a clear error
+- [ ] An unknown condition type, predicate, field or operator raises a clear error. So do `top`, `min_members` or `object_where` inside an `object_where`, `top` or `min_members` inside a `within`, and `min_members` with an `answer_kind` other than `franchise`
 - [ ] Each template can list its valid answers for a given set of params
-- [ ] `top` is tested for both `popularity` and `score`, including a tie at the cutoff and an entity with a NULL score
+- [ ] `top` is tested for both `popularity` and `score`, including a tie at the cutoff and an entity with a NULL score. It is also tested with `answer_kind = character`, where it ranks characters only
+- [ ] `top` with `within` is tested with a popular anime outside the genre (it takes no rank, so the genre's Nth anime is still an answer), a tie at the cutoff inside the genre, a genre with fewer than N anime (all are answers), and a second condition outside `within` that filters the ranked result
 - [ ] `airing_between` is tested with a long-running anime, a still-airing anime (`end_year` NULL) and one outside the range
-- [ ] Each template sets `answer_kind`, defaulting to `anime`. Every starter anime template uses `anime` for now, and the character template uses `character`. `franchise` gives one answer per franchise, and any member's name is accepted because the franchise carries all members' aliases. `anime` makes each season or movie its own answer
+- [ ] `field` is tested for each operator, including a NULL `score` that fails `gte` and `lte`
+- [ ] "Currently airing" is tested with a still-airing anime, a finished one and one that has not started yet; only the first is an answer
+- [ ] `ran_for` is tested with a finished long-runner, a still-airing anime measured against `as_of`, and one that is too short
+- [ ] `object_where` is tested for the three character templates that use it (franchise, studio and year): a character is an answer if at least one anime they appear in satisfies the nested conditions, and appears once even when several do
+- [ ] `min_members` is tested at the cutoff: a franchise with exactly N members is an answer and one with N − 1 is not
+- [ ] Each template sets `answer_kind` as grouped in the list above, defaulting to `anime`. `franchise` gives one answer per franchise, and any member's name is accepted because the franchise carries all members' aliases. `anime` makes each season or movie its own answer
 - [ ] Tested with a franchise whose studio changed between seasons: it is an answer for both studios under `franchise`, and only the matching seasons are answers under `anime`
 
 ### F-021 · Prompt generation + filtering · `todo`
@@ -304,6 +362,7 @@ Tailwind theme tokens (colors, type, spacing), with light and dark mode.
 - Tune after playtesting: rarity cutoffs (F-033), `MATCH_SIMILARITY_THRESHOLD` (0.4 for now) and `MAX_GUESSES_PER_PROMPT` (20 for now).
 - Visual identity (F-043): palette, fonts, tier colors and share emoji. Decide before M4.
 - Hosting: Vercel (frontend) + Fly/Render/Railway (API + Postgres)? Decide before deploying.
+- Stale answer sets: "currently airing" and `ran_for` prompts (F-020) depend on the year they were generated, and an anime can end after its prompt was generated. Decide how close to its puzzle day such a prompt must be regenerated (F-021, F-022).
 - Catalogue size: how many anime should production hold (`--limit`)? Only the 500-anime dev seed is defined. Decide before the first production ingest, once prompts exist and their answer counts can be checked.
 - Ingest cache expiry: the F-010 cache never expires, so a scheduled ingest with a warm cache fetches nothing new. Add a max age or a `--refresh` flag (`TODO(F-011)` in `ingest/anilist.py`). Until then, delete `backend/.cache/anilist/` to refetch. Decide before scheduling the ingest.
 - Ingest refresh schedule: how often to refetch, and whether to refresh the most popular anime more often than the long tail. AniList allows 30 requests per minute, so a large catalogue takes hours. Depends on catalogue size; measure a full run first. Decide before scheduling the ingest.
