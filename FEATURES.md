@@ -148,7 +148,7 @@ Extend the AniList client (F-010) and the normalizer (F-011) with three more fie
 
 ## Milestone 2: Prompts
 
-### F-020 · Prompt templates · `todo`
+### F-020 · Prompt templates · `done`
 Seed the templates below, each with a `query_def`. The project owner writes any further templates; don't invent new ones.
 
 Anime answers (`answer_kind = anime`):
@@ -222,19 +222,29 @@ A `query_def` is a JSON object with a `where` list of AND-ed conditions. The ans
 
 "Currently airing" is `end_year` `is_null: true` plus `start_year` `lte: "$year"`, where `$year` is the year the prompt was generated. The second condition excludes anime that have not started yet, which also have a NULL `end_year`.
 
-- [ ] One interpreter turns any `query_def` plus params into the list of answer entities; no per-template query code
-- [ ] An unknown condition type, predicate, field or operator raises a clear error. So do `top`, `min_members` or `object_where` inside an `object_where`, `top` or `min_members` inside a `within`, and `min_members` with an `answer_kind` other than `franchise`
-- [ ] Each template can list its valid answers for a given set of params
-- [ ] `top` is tested for both `popularity` and `score`, including a tie at the cutoff and an entity with a NULL score. It is also tested with `answer_kind = character`, where it ranks characters only
-- [ ] `top` with `within` is tested with a popular anime outside the genre (it takes no rank, so the genre's Nth anime is still an answer), a tie at the cutoff inside the genre, a genre with fewer than N anime (all are answers), and a second condition outside `within` that filters the ranked result
-- [ ] `airing_between` is tested with a long-running anime, a still-airing anime (`end_year` NULL) and one outside the range
-- [ ] `field` is tested for each operator, including a NULL `score` that fails `gte` and `lte`
-- [ ] "Currently airing" is tested with a still-airing anime, a finished one and one that has not started yet; only the first is an answer
-- [ ] `ran_for` is tested with a finished long-runner, a still-airing anime measured against `as_of`, and one that is too short
-- [ ] `object_where` is tested for the three character templates that use it (franchise, studio and year): a character is an answer if at least one anime they appear in satisfies the nested conditions, and appears once even when several do
-- [ ] `min_members` is tested at the cutoff: a franchise with exactly N members is an answer and one with N − 1 is not
-- [ ] Each template sets `answer_kind` as grouped in the list above, defaulting to `anime`. `franchise` gives one answer per franchise, and any member's name is accepted because the franchise carries all members' aliases. `anime` makes each season or movie its own answer
-- [ ] Tested with a franchise whose studio changed between seasons: it is an answer for both studios under `franchise`, and only the matching seasons are answers under `anime`
+Implementation notes:
+
+- The interpreter is `answer_select(answer_kind, query_def, params)` in `backend/app/services/query_def.py`. It builds one SELECT and raises `QueryDefError` for an invalid `query_def` or a missing param before any query runs. Answers come back most popular first.
+- The templates are defined in `backend/app/services/prompt_templates.py`, with slugs such as `anime-by-studio`. `uv run python -m jobs.seed_templates` upserts them into `prompt_template` by slug. It never changes `active` on an existing row and never deletes a row.
+- Params: `{name}` in a template's text and `"$name"` in its `query_def` both name a prompt param. A param for an entity (`studio`, `anime`, `franchise`) holds the entity's id. A `query_def` has no arithmetic, so a decade prompt carries `decade` (for the text) plus `from` and `to` (for the query), and "rated below {score}" carries `score` plus `max` = `score` − 1. Turning params into the final prompt text is F-021.
+- The fixed choices in the list above (`{25|50|100}` and the like) are kept in code as `TemplateDef.choices`, not in the database. F-021 reads them from there.
+- Every decade template uses `airing_between`, including the ones worded "from the {decade}s".
+- `top` is rejected when `answer_kind` is `franchise`. No template needs it, and the spec does not say whether it would rank franchises or their member anime.
+- A `predicate` condition also raises if it uses `object` or `object_where` with a value predicate (`format`, `genre`, `tag`, `source_material`) or `value` with an object predicate (`produced_by`, `appears_in`).
+
+- [x] One interpreter turns any `query_def` plus params into the list of answer entities; no per-template query code
+- [x] An unknown condition type, predicate, field or operator raises a clear error. So do `top`, `min_members` or `object_where` inside an `object_where`, `top` or `min_members` inside a `within`, and `min_members` with an `answer_kind` other than `franchise`
+- [x] Each template can list its valid answers for a given set of params
+- [x] `top` is tested for both `popularity` and `score`, including a tie at the cutoff and an entity with a NULL score. It is also tested with `answer_kind = character`, where it ranks characters only
+- [x] `top` with `within` is tested with a popular anime outside the genre (it takes no rank, so the genre's Nth anime is still an answer), a tie at the cutoff inside the genre, a genre with fewer than N anime (all are answers), and a second condition outside `within` that filters the ranked result
+- [x] `airing_between` is tested with a long-running anime, a still-airing anime (`end_year` NULL) and one outside the range
+- [x] `field` is tested for each operator, including a NULL `score` that fails `gte` and `lte`
+- [x] "Currently airing" is tested with a still-airing anime, a finished one and one that has not started yet; only the first is an answer
+- [x] `ran_for` is tested with a finished long-runner, a still-airing anime measured against `as_of`, and one that is too short
+- [x] `object_where` is tested for the three character templates that use it (franchise, studio and year): a character is an answer if at least one anime they appear in satisfies the nested conditions, and appears once even when several do
+- [x] `min_members` is tested at the cutoff: a franchise with exactly N members is an answer and one with N − 1 is not
+- [x] Each template sets `answer_kind` as grouped in the list above, defaulting to `anime`. `franchise` gives one answer per franchise, and any member's name is accepted because the franchise carries all members' aliases. `anime` makes each season or movie its own answer
+- [x] Tested with a franchise whose studio changed between seasons: it is an answer for both studios under `franchise`, and only the matching seasons are answers under `anime`
 
 ### F-021 · Prompt generation + filtering · `todo`
 Generate candidate prompts and precompute `prompt_answer` rows with `base_rarity`.
