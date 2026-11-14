@@ -131,6 +131,7 @@ Rules:
 ## Test setup
 
 - **Backend:** pytest against a real Postgres database named by `TEST_DATABASE_URL` (default `uhnime_test`). Postgres runs in Docker via `docker-compose.yml`; if tests can't connect, run `docker compose up -d` rather than installing Postgres locally. SQLite won't work because matching needs `pg_trgm`. The session fixture in `backend/tests/conftest.py` runs `alembic upgrade head` once. Each test runs inside a transaction that is rolled back afterward, so tests never see each other's data. Never point tests at `DATABASE_URL`.
+- API tests are async (`pytestmark = pytest.mark.anyio`) and use the `api_session` and `api_client` fixtures instead of `db_session`. Seed data with the sync factories through `await api_session.run_sync(fn)`, and set the clock by overriding the `get_now` dependency.
 - Pure functions (`normalize`, `scoring`) get plain unit tests with no DB fixture.
 - **Frontend:** Vitest + React Testing Library with jsdom. Test files sit next to the code as `*.test.ts(x)`. Mock `lib/api.ts`, not `fetch`.
 

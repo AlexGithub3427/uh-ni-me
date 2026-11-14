@@ -283,12 +283,19 @@ Implementation notes:
 
 ## Milestone 3: Gameplay API
 
-### F-030 · Daily puzzle endpoint · `todo`
+### F-030 · Daily puzzle endpoint · `done`
 `GET /api/puzzle/today` returns the puzzle metadata (date, number of prompts) with no answers.
-- [ ] "Today" is the current UTC date
-- [ ] Response includes the player's progress: for each finished prompt its outcome, points and rarity tier, so the client can resume, show "come back tomorrow" or render the results screen
-- [ ] 404 if no puzzle exists for today
-- [ ] Response never contains prompt text or answers
+- [x] "Today" is the current UTC date
+- [x] Response includes the player's progress: for each finished prompt its outcome, points and rarity tier, so the client can resume, show "come back tomorrow" or render the results screen
+- [x] 404 if no puzzle exists for today
+- [x] Response never contains prompt text or answers
+
+Implementation notes:
+
+- Response: `{ day, prompt_count, progress: [{ position, outcome, points, rarity_tier }] }`. `progress` holds finished prompts only, ordered by position, so the next prompt to play is `len(progress) + 1` and the day is complete when `len(progress) == prompt_count`.
+- An unanswered prompt whose time limit plus grace has passed is reported as `expired` with 0 points. The endpoint does not write that to the `submission` row; F-032 and F-035 do.
+- The player comes from the `player_id` cookie, which this endpoint only reads. A missing, malformed or unknown cookie gives an empty `progress`. Creating the player and setting the cookie is F-034.
+- API tests are async and use the `api_session` and `api_client` fixtures in `backend/tests/conftest.py` (asyncpg, rolled back per test). The clock is the `get_now` dependency in `backend/app/api/deps.py`; tests override it.
 
 ### F-031 · Serve prompt · `todo`
 `POST /api/play/{day}/prompt/{n}/start` returns the prompt text and records the server start time by creating the player's `submission` row with `started_at`.
