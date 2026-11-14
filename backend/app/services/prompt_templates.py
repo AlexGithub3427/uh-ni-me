@@ -100,7 +100,7 @@ TEMPLATES: tuple[TemplateDef, ...] = (
     ),
     TemplateDef(
         "anime-by-studio-in-decade",
-        "Name a {studio} anime from the {decade}s",
+        "Name an anime by {studio} from the {decade}s",
         (_BY_STUDIO, _IN_DECADE),
     ),
     TemplateDef(
@@ -188,7 +188,7 @@ TEMPLATES: tuple[TemplateDef, ...] = (
     ),
     TemplateDef(
         "character-from-studio-anime",
-        "Name a character from a {studio} anime",
+        "Name a character from an anime by {studio}",
         (_appears_in(_BY_STUDIO),),
         answer_kind="character",
     ),

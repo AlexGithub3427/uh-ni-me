@@ -161,7 +161,7 @@ Anime answers (`answer_kind = anime`):
 - `Name a {genre} and {genre} anime`
 - `Name a {genre} anime airing in the {decade}s`
 - `Name a {genre} anime by {studio}`
-- `Name a {studio} anime from the {decade}s`
+- `Name an anime by {studio} from the {decade}s`
 - `Name an anime in the top {25|50|100} most popular {genre} anime` (ranked within the genre, using `within`)
 - `Name an anime from the top {25|50|100|250} highest rated {decade}'s anime` (ranked within the decade, using `within` with `airing_between`)
 - `Name an anime movie from the {decade}s`
@@ -181,7 +181,7 @@ Franchise answers (`answer_kind = franchise`):
 Character answers (`answer_kind = character`):
 - `Name a character from {anime}`
 - `Name a character from the {franchise} franchise`
-- `Name a character from a {studio} anime`
+- `Name a character from an anime by {studio}`
 - `Name a character from an anime that aired in {year}`
 - `Name one of the top {25|50|100|250} most favourited characters`
 
@@ -212,7 +212,7 @@ A `query_def` is a JSON object with a `where` list of AND-ed conditions. The ans
 
 - `predicate` + `object`: the answer is the subject of a fact whose object is that entity
 - `predicate` + `value`: the answer is the subject of a fact with that literal value
-- `predicate` + `object_where`: the answer is the subject of a fact whose object satisfies every condition in the nested list. The nested list takes the same condition types, tested against the object entity, except `top`, `min_members` and another `object_where` (one level of nesting only). "A character from a {studio} anime" is the example above
+- `predicate` + `object_where`: the answer is the subject of a fact whose object satisfies every condition in the nested list. The nested list takes the same condition types, tested against the object entity, except `top`, `min_members` and another `object_where` (one level of nesting only). "A character from an anime by {studio}" is the example above
 - `field` + one of `eq`, `between`, `gte`, `lte`, `is_null`: a condition on an `entity` column (`start_year`, `end_year`, `score`, `episodes` or `franchise_id`; `franchise_id` takes `eq` only). `between` is inclusive. `is_null` takes `true` or `false`. A NULL column fails every operator except `is_null: true`. Scores are whole numbers, so "rated below 60" is `lte: 59`
 - `airing_between`: the anime was airing at some point in the range, i.e. `start_year <= to` and (`end_year >= from` or `end_year` is NULL). "Airing in the 2000s" is `[2000, 2009]`; "airing in 2005" is `[2005, 2005]`
 - `ran_for` + `as_of`: the anime spans at least that many years, i.e. `coalesce(end_year, as_of) - start_year >= years`. `as_of` is the year the prompt was generated and stands in for the end of an anime that is still airing. It compares calendar years, so it is approximate. An anime with no `start_year` never qualifies
@@ -246,11 +246,21 @@ Implementation notes:
 - [x] Each template sets `answer_kind` as grouped in the list above, defaulting to `anime`. `franchise` gives one answer per franchise, and any member's name is accepted because the franchise carries all members' aliases. `anime` makes each season or movie its own answer
 - [x] Tested with a franchise whose studio changed between seasons: it is an answer for both studios under `franchise`, and only the matching seasons are answers under `anime`
 
-### F-021 · Prompt generation + filtering · `todo`
+### F-021 · Prompt generation + filtering · `done`
 Generate candidate prompts and precompute `prompt_answer` rows with `base_rarity`.
-- [ ] Keep only prompts whose answer count is in a configured range (`PROMPT_MIN_ANSWERS`–`PROMPT_MAX_ANSWERS`, default 25–500, so a "top 25" prompt is playable)
-- [ ] `base_rarity` is a log-scaled inverse of popularity, normalized to 0–1 within each prompt. Rarity is per entry: each entity in the answer set has its own value
-- [ ] Regenerating an existing prompt upserts its `prompt_answer` rows and preserves `times_answered`. Answers that no longer qualify (e.g. an anime that dropped out of the top 100) are removed
+- [x] Keep only prompts whose answer count is in a configured range (`PROMPT_MIN_ANSWERS`–`PROMPT_MAX_ANSWERS`, default 25–500, so a "top 25" prompt is playable)
+- [x] `base_rarity` is a log-scaled inverse of popularity, normalized to 0–1 within each prompt. Rarity is per entry: each entity in the answer set has its own value
+- [x] Regenerating an existing prompt upserts its `prompt_answer` rows and preserves `times_answered`. Answers that no longer qualify (e.g. an anime that dropped out of the top 100) are removed
+
+Implementation notes:
+
+- `uv run python -m jobs.generate_prompts` runs it (`backend/jobs/generate_prompts.py`). Run it after an ingest and after `jobs.seed_templates`; it only generates templates that are seeded and `active`.
+- Formula, in `base_rarities()` in `backend/app/services/scoring.py`: with `L = ln(1 + popularity)`, `base_rarity = (L_max − L) / (L_max − L_min)` over the prompt's answers. The most popular answer gets 0 and the least popular gets 1. If every answer is equally popular, they all get 0.5.
+- Candidates are a template's `TemplateDef.choices` crossed with the values the data offers for its other params: every studio, anime and franchise entity, every distinct `genre` and `tag` value, every year from the earliest `start_year` to the current year, and every decade over the same span. A two-genre prompt takes each pair once, in alphabetical order.
+- A `year` param that the template's text does not show ("currently airing", "ran for N+ years") is the year of generation. The current date is passed in, so tests never read the clock.
+- Prompt text: an entity param is replaced by the entity's `canonical_name`, and "a {x}" becomes "an" when the value starts with a vowel ("Name an Action anime"). This goes by the first letter only, which is wrong for names such as "ufotable" and "8bit", so no template puts an article directly before an entity name (`{studio}`, `{anime}`, `{franchise}`); a test enforces this. Word new templates as "by {studio}" instead.
+- After a run, the active prompts of the generated templates are exactly the candidates in range. A prompt that left the range, or is no longer a candidate (last year's "currently airing"), is set `active = false` and keeps its old answers; it is never deleted, because past puzzles may point at it. A prompt that comes back into range is set active again. This overrides a prompt switched off by hand, which matters once F-054 exists.
+- Each candidate runs one query. `TODO`: measure this on the production catalogue size; if it is slow, count before fetching or skip studios with too few anime.
 
 ### F-022 · Daily puzzle job · `todo`
 `uv run python -m jobs.generate_daily --date YYYY-MM-DD` picks 7 prompts. `--date` is optional and defaults to today (UTC).

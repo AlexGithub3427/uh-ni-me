@@ -46,6 +46,7 @@ uv run ruff check . && uv run ruff format .
 uv run alembic revision --autogenerate -m "msg" && uv run alembic upgrade head
 uv run python -m ingest.run --source anilist --limit 100
 uv run python -m jobs.seed_templates      # upsert the prompt templates (F-020)
+uv run python -m jobs.generate_prompts    # generate prompts + answers from the templates (F-021)
 uv run python -m jobs.generate_daily --date YYYY-MM-DD   # --date defaults to today (UTC)
 
 # frontend (from frontend/)
