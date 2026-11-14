@@ -262,13 +262,22 @@ Implementation notes:
 - After a run, the active prompts of the generated templates are exactly the candidates in range. A prompt that left the range, or is no longer a candidate (last year's "currently airing"), is set `active = false` and keeps its old answers; it is never deleted, because past puzzles may point at it. A prompt that comes back into range is set active again. This overrides a prompt switched off by hand, which matters once F-054 exists.
 - Each candidate runs one query. `TODO`: measure this on the production catalogue size; if it is slow, count before fetching or skip studios with too few anime.
 
-### F-022 · Daily puzzle job · `todo`
+### F-022 · Daily puzzle job · `done`
 `uv run python -m jobs.generate_daily --date YYYY-MM-DD` picks 7 prompts. `--date` is optional and defaults to today (UTC).
-- [ ] No template appears more than twice in one day
-- [ ] No prompt repeats within 60 days
-- [ ] Deterministic for a given date and `PUZZLE_SEED`
-- [ ] Re-running for a date that already has a puzzle is a no-op (no duplicate `daily_puzzle`)
-- [ ] `--days N` (default 1) generates N consecutive days starting at `--date`. The nightly schedule runs `--days 7`, so puzzles always exist a week ahead
+- [x] No template appears more than twice in one day
+- [x] No prompt repeats within 60 days
+- [x] Deterministic for a given date and `PUZZLE_SEED`
+- [x] Re-running for a date that already has a puzzle is a no-op (no duplicate `daily_puzzle`)
+- [x] `--days N` (default 1) generates N consecutive days starting at `--date`. The nightly schedule runs `--days 7`, so puzzles always exist a week ahead
+
+Implementation notes:
+
+- `backend/jobs/generate_daily.py`. Run it after `jobs.generate_prompts`. Only `active` prompts of `active` templates are picked.
+- The pick chooses a template at random, then one of its prompts, seven times. Choosing among all prompts directly would let a template with hundreds of prompts (tags) fill most days. Positions 1–7 are the pick order.
+- The random generator is seeded with `PUZZLE_SEED` and the date. The result also depends on which prompts are available (the active set and the days already generated), so regenerating a deleted day after the prompts changed can give a different puzzle.
+- Repeat window (`PROMPT_REPEAT_WINDOW_DAYS`, default 60): a prompt used on day D can next be used on D+61. Days after the target date are checked too, so backfilling a past day cannot repeat a prompt from a later one.
+- A day that already has any `daily_puzzle` row is skipped, whatever the seed.
+- If a day cannot be filled (fewer than 7 usable prompts, or fewer than 4 usable templates), nothing is written for that day, the error goes to stderr and the exit code is 1. Days generated earlier in the same run are kept (each day is committed separately).
 
 ---
 

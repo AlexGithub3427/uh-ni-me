@@ -121,7 +121,9 @@ npm run dev                      # http://localhost:3000
 ```bash
 cd backend
 uv run python -m ingest.run --source anilist --limit 500   # small dev seed
-uv run python -m jobs.generate_daily                        # --date defaults to today (UTC)
+uv run python -m jobs.seed_templates                        # upsert the prompt templates
+uv run python -m jobs.generate_prompts                      # prompts + answers from the templates
+uv run python -m jobs.generate_daily --days 7               # --date defaults to today (UTC)
 ```
 
 ## Data sources and etiquette
