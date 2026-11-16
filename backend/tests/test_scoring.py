@@ -2,7 +2,8 @@
 
 import pytest
 
-from app.services.scoring import base_rarities
+from app.models import RARITY_TIERS
+from app.services.scoring import TIERS, base_rarities, tier_and_points
 
 
 def test_f021_base_rarity_runs_from_most_popular_to_least_popular() -> None:
@@ -30,3 +31,23 @@ def test_f021_base_rarity_is_the_midpoint_when_every_answer_is_equally_popular()
 
 def test_f021_base_rarity_of_no_answers_is_empty() -> None:
     assert base_rarities([]) == []
+
+
+@pytest.mark.parametrize(
+    ("rarity", "tier", "points"),
+    [
+        (0.1, "larp", 10),
+        (0.3, "normie", 30),
+        (0.5, "niche", 60),
+        (0.7, "weeb", 85),
+        (0.9, "uh-ni-me", 100),
+    ],
+)
+def test_f032_an_accepted_answer_gets_the_tier_and_points_of_its_rarity(
+    rarity: float, tier: str, points: int
+) -> None:
+    assert tier_and_points(rarity) == (tier, points)
+
+
+def test_f032_scoring_tiers_are_the_ones_the_schema_allows() -> None:
+    assert tuple(tier for tier, _, _ in TIERS) == RARITY_TIERS

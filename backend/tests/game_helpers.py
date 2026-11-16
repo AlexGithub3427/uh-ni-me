@@ -9,7 +9,17 @@ from sqlalchemy.orm import Session
 from app.api.deps import get_now
 from app.config import get_settings
 from app.main import app
-from app.models import DailyPuzzle, Player, Prompt, PromptTemplate, Submission
+from app.models import (
+    DailyPuzzle,
+    Entity,
+    EntityAlias,
+    Player,
+    Prompt,
+    PromptAnswer,
+    PromptTemplate,
+    Submission,
+)
+from app.services.normalize import normalize
 from tests.factories import make_anime
 
 DAY = date(2026, 6, 1)
@@ -59,6 +69,7 @@ def start_prompt(
     outcome: str | None = None,
     points: int | None = None,
     rarity_tier: str | None = None,
+    guess_count: int = 0,
 ) -> None:
     """A submission row as F-031/F-032 leave it. No ``outcome`` means still unanswered."""
     columns: dict[str, Any] = {}
@@ -75,10 +86,26 @@ def start_prompt(
             started_at=started_at,
             points=points,
             rarity_tier=rarity_tier,
+            guess_count=guess_count,
             **columns,
         )
     )
     session.flush()
+
+
+def add_answer(
+    session: Session, prompt: Prompt, entity: Entity, *aliases: str, base_rarity: float = 0.5
+) -> Entity:
+    """Make ``entity`` a valid answer for ``prompt``, typed as its name or any of ``aliases``."""
+    # One alias per match key, as ingest stores them.
+    by_key = {normalize(alias): alias for alias in (*aliases, entity.canonical_name)}
+    session.add_all(
+        EntityAlias(entity_id=entity.id, alias=alias, normalized=key)
+        for key, alias in by_key.items()
+    )
+    session.add(PromptAnswer(prompt_id=prompt.id, entity_id=entity.id, base_rarity=base_rarity))
+    session.flush()
+    return entity
 
 
 def time_limit() -> timedelta:

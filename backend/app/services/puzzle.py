@@ -3,11 +3,11 @@
 import uuid
 from datetime import date, datetime, timedelta
 
-from sqlalchemy import func, select
+from sqlalchemy import func, select, update
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.models import DailyPuzzle, Player, Prompt, Submission
+from app.models import DailyPuzzle, Player, Prompt, PromptAnswer, Submission
 from app.schemas.puzzle import PromptProgress
 
 
@@ -41,10 +41,14 @@ async def player_exists(session: AsyncSession, player_id: uuid.UUID) -> bool:
 
 
 async def submission_at(
-    session: AsyncSession, player_id: uuid.UUID, day: date, position: int
+    session: AsyncSession, player_id: uuid.UUID, day: date, position: int, *, lock: bool = False
 ) -> Submission | None:
-    """The player's submission for the prompt at ``position``, if it was served."""
-    return await session.scalar(
+    """The player's submission for the prompt at ``position``, if it was served.
+
+    ``lock`` holds the row until the transaction ends, so two guesses sent at
+    once are handled one after the other.
+    """
+    statement = (
         select(Submission)
         .join(
             DailyPuzzle,
@@ -56,6 +60,9 @@ async def submission_at(
             DailyPuzzle.position == position,
         )
     )
+    if lock:
+        statement = statement.with_for_update(of=Submission)
+    return await session.scalar(statement)
 
 
 async def start_prompt(
@@ -71,6 +78,18 @@ async def start_prompt(
     started_at = await session.scalar(select(Submission.started_at).filter_by(**key))
     assert started_at is not None
     return started_at
+
+
+async def count_answer(session: AsyncSession, prompt_id: int, entity_id: int) -> float:
+    """Count one more player giving this answer and return its ``base_rarity``."""
+    base_rarity = await session.scalar(
+        update(PromptAnswer)
+        .where(PromptAnswer.prompt_id == prompt_id, PromptAnswer.entity_id == entity_id)
+        .values(times_answered=PromptAnswer.times_answered + 1)
+        .returning(PromptAnswer.base_rarity)
+    )
+    assert base_rarity is not None
+    return base_rarity
 
 
 async def player_progress(

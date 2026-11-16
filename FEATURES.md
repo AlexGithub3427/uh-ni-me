@@ -312,19 +312,29 @@ Implementation notes:
 - Starting a prompt again always returns the original `started_at` and `deadline`, also after it is finished. The row is inserted with `ON CONFLICT DO NOTHING`, so two racing requests keep the first start time.
 - The "finished" rule is `is_finished` in `backend/app/services/puzzle.py`, shared with F-030. Seed helpers for gameplay API tests are in `backend/tests/game_helpers.py`.
 
-### F-032 · Submit answer · `todo`
+### F-032 · Submit answer · `done`
 `POST /api/play/{day}/prompt/{n}/answer` with `{ "text": "..." }`. The player can keep guessing until a guess is accepted or the deadline passes. Updates the `submission` row created by F-031.
-- [ ] Rejects guesses for a prompt that was never started (409)
-- [ ] Blank text is rejected (422) and doesn't count as a guess
-- [ ] A wrong guess before the deadline returns `accepted: false, finished: false`, is appended to `wrong_guesses`, and the player may guess again
-- [ ] The first valid guess is accepted: sets `outcome = accepted`, `finished_at`, `raw_text`, `matched_entity_id`, `points` and `rarity_tier`, and increments that answer's `times_answered`
-- [ ] A guess after an accepted answer is rejected (409)
-- [ ] A guess arriving after `ANSWER_TIME_LIMIT_SECONDS` + `ANSWER_GRACE_SECONDS` is not matched: it sets `outcome = expired` with 0 points and returns `accepted: false, finished: true`
-- [ ] More than `MAX_GUESSES_PER_PROMPT` guesses on one prompt are rejected (429), so a script can't brute-force rare answers
-- [ ] Matches by exact alias first, then trigram similarity above `MATCH_SIMILARITY_THRESHOLD` against the prompt's answer set
-- [ ] If the input matches several answers equally well, the more popular one is awarded
-- [ ] `points` and `rarity_tier` are stored at answer time and never recomputed
-- [ ] Response: `{ accepted, finished, matched_name, points, rarity_tier }`. It never contains the answer list (that is F-035)
+- [x] Rejects guesses for a prompt that was never started (409)
+- [x] Blank text is rejected (422) and doesn't count as a guess
+- [x] A wrong guess before the deadline returns `accepted: false, finished: false`, is appended to `wrong_guesses`, and the player may guess again
+- [x] The first valid guess is accepted: sets `outcome = accepted`, `finished_at`, `raw_text`, `matched_entity_id`, `points` and `rarity_tier`, and increments that answer's `times_answered`
+- [x] A guess after an accepted answer is rejected (409)
+- [x] A guess arriving after `ANSWER_TIME_LIMIT_SECONDS` + `ANSWER_GRACE_SECONDS` is not matched: it sets `outcome = expired` with 0 points and returns `accepted: false, finished: true`
+- [x] More than `MAX_GUESSES_PER_PROMPT` guesses on one prompt are rejected (429), so a script can't brute-force rare answers
+- [x] Matches by exact alias first, then trigram similarity above `MATCH_SIMILARITY_THRESHOLD` against the prompt's answer set
+- [x] If the input matches several answers equally well, the more popular one is awarded
+- [x] `points` and `rarity_tier` are stored at answer time and never recomputed
+- [x] Response: `{ accepted, finished, matched_name, points, rarity_tier }`. It never contains the answer list (that is F-035)
+
+Implementation notes:
+
+- The matcher is `match_answer` in `backend/app/services/matching.py`. It joins `prompt_answer` to `entity_alias`, so only the prompt's own answers are candidates. An exact match on the normalized alias wins; otherwise the most similar alias wins if its similarity is strictly above the threshold. Ties are settled by `entity.popularity`. The threshold is compared as a `real`, because `similarity()` returns one: compared as a double, a similarity of exactly 0.4 would pass a 0.4 threshold.
+- Checks run in this order: 422 for the body (blank after trimming, or longer than 200 characters), then the same 404 / 401 rejections as F-031, 409 for a prompt never started or already answered, the deadline, 429 for the guess limit, and only then the match. So a player who is out of guesses still gets `finished: true` once the time is up.
+- Only matched guesses count toward `guess_count`: wrong and accepted ones do, while 422, 429 and late guesses don't. `wrong_guesses` and `raw_text` hold the text as typed, trimmed.
+- An expired prompt gets `finished_at = started_at` + limit + grace (when it ran out, not when the server noticed) and `points = 0`. Guessing again on an expired prompt returns the same `accepted: false, finished: true` and changes nothing.
+- `points` is 0 in every response that is not an accepted answer; `matched_name` and `rarity_tier` are null.
+- The submission row is read `FOR UPDATE`, so two guesses sent at once can't both be accepted. `times_answered` is incremented in the same transaction.
+- Tier and points come from `tier_and_points` in `services/scoring.py`, for now from `base_rarity` alone. The tier table (names, cutoffs, points) is the `TIERS` constant there; a rarity exactly on a cutoff belongs to the rarer tier. The `times_answered` blend and the boundary tests are still F-033.
 
 ### F-033 · Scoring v1 · `todo`
 Pure function in `services/scoring.py`. Points are fixed per rarity tier; the maximum for a day is 700.

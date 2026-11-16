@@ -21,4 +21,24 @@ def base_rarities(popularities: Sequence[int]) -> list[float]:
     return [(high - log) / (high - low) for log in logs]
 
 
-# TODO(F-033): rarity tiers, points and the times_answered blend.
+# (tier, lowest rarity in the tier, points), most common to rarest. The cutoffs
+# are placeholders to tune after playtesting (F-033).
+TIERS: tuple[tuple[str, float, int], ...] = (
+    ("larp", 0.0, 10),
+    ("normie", 0.2, 30),
+    ("niche", 0.4, 60),
+    ("weeb", 0.6, 85),
+    ("uh-ni-me", 0.8, 100),
+)
+
+
+def tier_and_points(rarity: float) -> tuple[str, int]:
+    """The rarity tier of a valid answer with ``rarity`` (0-1) and the points it scores.
+
+    A rarity exactly on a cutoff belongs to the rarer tier.
+    """
+    # TODO(F-033): blend times_answered into the rarity, and test each tier boundary.
+    tier, _, points = max(
+        (entry for entry in TIERS if rarity >= entry[1]), key=lambda entry: entry[1]
+    )
+    return tier, points
