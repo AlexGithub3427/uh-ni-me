@@ -297,13 +297,20 @@ Implementation notes:
 - The player comes from the `player_id` cookie, which this endpoint only reads. A missing, malformed or unknown cookie gives an empty `progress`. Creating the player and setting the cookie is F-034.
 - API tests are async and use the `api_session` and `api_client` fixtures in `backend/tests/conftest.py` (asyncpg, rolled back per test). The clock is the `get_now` dependency in `backend/app/api/deps.py`; tests override it.
 
-### F-031 · Serve prompt · `todo`
+### F-031 · Serve prompt · `done`
 `POST /api/play/{day}/prompt/{n}/start` returns the prompt text and records the server start time by creating the player's `submission` row with `started_at`.
-- [ ] Prompts are served in order; prompt n requires n-1 to be finished ("finished" is defined in CLAUDE.md, Game integrity)
-- [ ] `day` must be today (UTC); other days are rejected until archive mode (F-052)
-- [ ] Calling start again for an already-started prompt returns the original start time and does not reset the timer
-- [ ] Response includes `started_at` and `deadline` (server time) so the client can render the countdown
-- [ ] Never includes answers
+- [x] Prompts are served in order; prompt n requires n-1 to be finished ("finished" is defined in CLAUDE.md, Game integrity)
+- [x] `day` must be today (UTC); other days are rejected until archive mode (F-052)
+- [x] Calling start again for an already-started prompt returns the original start time and does not reset the timer
+- [x] Response includes `started_at` and `deadline` (server time) so the client can render the countdown
+- [x] Never includes answers
+
+Implementation notes:
+
+- Response: `{ position, text, started_at, deadline }`. `deadline` is `started_at` plus `ANSWER_TIME_LIMIT_SECONDS`, without the grace, so the countdown ends at 25 seconds while the server still accepts a guess for `ANSWER_GRACE_SECONDS` more.
+- Rejections: 404 for a `day` that is not today or a position outside the puzzle, 401 for a missing, malformed or unknown `player_id` cookie (until F-034 creates players), 409 when prompt n-1 is not finished. None of them creates a `submission` row or returns prompt text.
+- Starting a prompt again always returns the original `started_at` and `deadline`, also after it is finished. The row is inserted with `ON CONFLICT DO NOTHING`, so two racing requests keep the first start time.
+- The "finished" rule is `is_finished` in `backend/app/services/puzzle.py`, shared with F-030. Seed helpers for gameplay API tests are in `backend/tests/game_helpers.py`.
 
 ### F-032 · Submit answer · `todo`
 `POST /api/play/{day}/prompt/{n}/answer` with `{ "text": "..." }`. The player can keep guessing until a guess is accepted or the deadline passes. Updates the `submission` row created by F-031.

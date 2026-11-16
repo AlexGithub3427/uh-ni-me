@@ -1,12 +1,13 @@
-"""Reads of the daily puzzle and a player's progress through it."""
+"""The daily puzzle and a player's progress through it."""
 
 import uuid
 from datetime import date, datetime, timedelta
 
 from sqlalchemy import func, select
+from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.models import DailyPuzzle, Submission
+from app.models import DailyPuzzle, Player, Prompt, Submission
 from app.schemas.puzzle import PromptProgress
 
 
@@ -16,6 +17,60 @@ async def prompt_count(session: AsyncSession, day: date) -> int:
         select(func.count()).select_from(DailyPuzzle).where(DailyPuzzle.day == day)
     )
     return count or 0
+
+
+def is_finished(submission: Submission, *, now: datetime, time_limit: timedelta) -> bool:
+    """Whether a served prompt is finished for its player (CLAUDE.md, Game integrity).
+
+    ``time_limit`` is the answer time limit plus grace.
+    """
+    return submission.outcome is not None or now > submission.started_at + time_limit
+
+
+async def prompt_at(session: AsyncSession, day: date, position: int) -> Prompt | None:
+    """The prompt at ``position`` of ``day``'s puzzle."""
+    return await session.scalar(
+        select(Prompt)
+        .join(DailyPuzzle, DailyPuzzle.prompt_id == Prompt.id)
+        .where(DailyPuzzle.day == day, DailyPuzzle.position == position)
+    )
+
+
+async def player_exists(session: AsyncSession, player_id: uuid.UUID) -> bool:
+    return await session.get(Player, player_id) is not None
+
+
+async def submission_at(
+    session: AsyncSession, player_id: uuid.UUID, day: date, position: int
+) -> Submission | None:
+    """The player's submission for the prompt at ``position``, if it was served."""
+    return await session.scalar(
+        select(Submission)
+        .join(
+            DailyPuzzle,
+            (DailyPuzzle.day == Submission.day) & (DailyPuzzle.prompt_id == Submission.prompt_id),
+        )
+        .where(
+            Submission.player_id == player_id,
+            Submission.day == day,
+            DailyPuzzle.position == position,
+        )
+    )
+
+
+async def start_prompt(
+    session: AsyncSession, player_id: uuid.UUID, day: date, prompt_id: int, *, now: datetime
+) -> datetime:
+    """Record that the prompt was served at ``now`` and return its start time.
+
+    A prompt that was already served keeps its original start time, also when
+    two requests race. The caller commits.
+    """
+    key = {"player_id": player_id, "day": day, "prompt_id": prompt_id}
+    await session.execute(insert(Submission).values(**key, started_at=now).on_conflict_do_nothing())
+    started_at = await session.scalar(select(Submission.started_at).filter_by(**key))
+    assert started_at is not None
+    return started_at
 
 
 async def player_progress(
@@ -43,14 +98,11 @@ async def player_progress(
     )
     progress = []
     for position, submission in rows:
-        outcome = submission.outcome
-        if outcome is None and now > submission.started_at + time_limit:
-            outcome = "expired"
-        if outcome is not None:
+        if is_finished(submission, now=now, time_limit=time_limit):
             progress.append(
                 PromptProgress(
                     position=position,
-                    outcome=outcome,
+                    outcome=submission.outcome or "expired",
                     points=submission.points or 0,
                     rarity_tier=submission.rarity_tier,
                 )
