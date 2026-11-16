@@ -41,6 +41,14 @@ async def player_exists(session: AsyncSession, player_id: uuid.UUID) -> bool:
     return await session.get(Player, player_id) is not None
 
 
+async def create_player(session: AsyncSession) -> uuid.UUID:
+    """A new anonymous player (F-034). The caller commits."""
+    player = Player()
+    session.add(player)
+    await session.flush()
+    return player.id
+
+
 async def submission_at(
     session: AsyncSession, player_id: uuid.UUID, day: date, position: int, *, lock: bool = False
 ) -> Submission | None:

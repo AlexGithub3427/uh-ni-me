@@ -279,9 +279,10 @@ async def test_f031_returns_404_when_today_has_no_puzzle(
 
 
 @pytest.mark.parametrize("cookie", [None, "not-a-uuid", "00000000-0000-4000-8000-000000000000"])
-async def test_f031_a_request_without_a_known_player_is_rejected(
+async def test_f031_a_request_without_a_known_player_starts_as_a_new_player(
     api_client: httpx2.AsyncClient, api_session: AsyncSession, cookie: str | None
 ) -> None:
+    # Was a 401 until F-034 created players; the cookie itself is tested in test_players.py.
     await api_session.run_sync(make_puzzle, DAY)
     if cookie:
         api_client.cookies.set(PLAYER_COOKIE, cookie)
@@ -289,6 +290,7 @@ async def test_f031_a_request_without_a_known_player_is_rejected(
 
     response = await api_client.post(start_url(1))
 
-    assert response.status_code == 401
-    assert "Name an anime" not in response.text
-    assert await submissions(api_session) == []
+    assert response.status_code == 200
+    [row] = await submissions(api_session)
+    assert str(row.player_id) != cookie
+    assert row.started_at == NOON
