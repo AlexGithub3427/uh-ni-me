@@ -1,6 +1,7 @@
 """The daily puzzle and a player's progress through it."""
 
 import uuid
+from dataclasses import dataclass
 from datetime import date, datetime, timedelta
 
 from sqlalchemy import func, select, update
@@ -80,16 +81,42 @@ async def start_prompt(
     return started_at
 
 
-async def count_answer(session: AsyncSession, prompt_id: int, entity_id: int) -> float:
-    """Count one more player giving this answer and return its ``base_rarity``."""
-    base_rarity = await session.scalar(
-        update(PromptAnswer)
-        .where(PromptAnswer.prompt_id == prompt_id, PromptAnswer.entity_id == entity_id)
-        .values(times_answered=PromptAnswer.times_answered + 1)
-        .returning(PromptAnswer.base_rarity)
+@dataclass(frozen=True)
+class AnswerCounts:
+    """What the scorer needs to know about an accepted answer (F-033)."""
+
+    base_rarity: float
+    times_answered: int
+    most_answered: int
+    total_answered: int
+
+
+async def count_answer(session: AsyncSession, prompt_id: int, entity_id: int) -> AnswerCounts:
+    """Count one more player giving this answer and return the prompt's counts.
+
+    The counts include the answer just given.
+    """
+    row = (
+        await session.execute(
+            update(PromptAnswer)
+            .where(PromptAnswer.prompt_id == prompt_id, PromptAnswer.entity_id == entity_id)
+            .values(times_answered=PromptAnswer.times_answered + 1)
+            .returning(PromptAnswer.base_rarity, PromptAnswer.times_answered)
+        )
+    ).one()
+    most, total = (
+        await session.execute(
+            select(
+                func.max(PromptAnswer.times_answered), func.sum(PromptAnswer.times_answered)
+            ).where(PromptAnswer.prompt_id == prompt_id)
+        )
+    ).one()
+    return AnswerCounts(
+        base_rarity=row.base_rarity,
+        times_answered=row.times_answered,
+        most_answered=most,
+        total_answered=total,
     )
-    assert base_rarity is not None
-    return base_rarity
 
 
 async def player_progress(

@@ -28,6 +28,7 @@ from tests.game_helpers import (
 pytestmark = pytest.mark.anyio
 
 MAX_GUESSES = get_settings().max_guesses_per_prompt
+BLEND_MIN = get_settings().scoring_blend_min_submissions
 WRONG = {
     "accepted": False,
     "finished": False,
@@ -383,6 +384,64 @@ async def test_f032_points_and_tier_are_stored_at_answer_time(
     assert (row.points, row.rarity_tier) == (10, "larp")
     [progress] = today["progress"]
     assert (progress["points"], progress["rarity_tier"]) == (10, "larp")
+
+
+async def answered_before(api_session: AsyncSession, entity_id: int, times: int) -> None:
+    """Other players already gave this answer ``times`` times."""
+    await api_session.execute(
+        update(PromptAnswer).where(PromptAnswer.entity_id == entity_id).values(times_answered=times)
+    )
+
+
+async def test_f033_an_answer_many_players_gave_scores_less_than_its_base_rarity(
+    api_client: httpx2.AsyncClient, api_session: AsyncSession
+) -> None:
+    game = await new_game(api_client, api_session)
+    # With this guess the prompt is 500 answers past the minimum: a weight of 0.25.
+    await answered_before(api_session, game.mob_id, BLEND_MIN + 499)
+
+    body = (await guess(api_client, "Mob Psycho 100")).json()
+
+    # Base rarity 0.9 and observed rarity 0 (the most-given answer): 0.75 * 0.9 = 0.675.
+    assert (body["points"], body["rarity_tier"]) == (85, "weeb")
+    row = await the_submission(api_session)
+    assert (row.points, row.rarity_tier) == (85, "weeb")
+
+
+async def test_f033_times_answered_is_ignored_below_the_minimum_submissions(
+    api_client: httpx2.AsyncClient, api_session: AsyncSession
+) -> None:
+    game = await new_game(api_client, api_session)
+    await answered_before(api_session, game.mob_id, BLEND_MIN - 2)
+
+    body = (await guess(api_client, "Mob Psycho 100")).json()
+
+    assert (body["points"], body["rarity_tier"]) == (100, "uh-ni-me")
+
+
+async def test_f033_the_blend_counts_every_answer_of_the_prompt_and_no_other(
+    api_client: httpx2.AsyncClient, api_session: AsyncSession
+) -> None:
+    game = await new_game(api_client, api_session)
+    await answered_before(api_session, game.mob_id, BLEND_MIN + 498)
+
+    def other_prompt(session: Session) -> None:
+        prompt = make_puzzle(session, DAY + timedelta(days=1))[0]
+        add_answer(session, prompt, make_anime(session, "Naruto"))
+
+    await api_session.run_sync(other_prompt)
+    await api_session.execute(
+        update(PromptAnswer)
+        .where(PromptAnswer.prompt_id != game.prompt_id)
+        .values(times_answered=10_000)
+    )
+
+    body = (await guess(api_client, "Attack on Titan")).json()
+
+    # 1 of the prompt's 550 answers, and its most-given answer has 549: the observed
+    # rarity is 1 - log(2)/log(550) = 0.89 at a weight of 0.25, so the rarity is
+    # 0.75 * 0.1 + 0.25 * 0.89 = 0.30. Counting the other prompt's 10,000 would make it 0.48.
+    assert (body["points"], body["rarity_tier"]) == (30, "normie")
 
 
 @pytest.mark.parametrize("text", ["Attack on Titan", "Naruto"])

@@ -334,9 +334,9 @@ Implementation notes:
 - An expired prompt gets `finished_at = started_at` + limit + grace (when it ran out, not when the server noticed) and `points = 0`. Guessing again on an expired prompt returns the same `accepted: false, finished: true` and changes nothing.
 - `points` is 0 in every response that is not an accepted answer; `matched_name` and `rarity_tier` are null.
 - The submission row is read `FOR UPDATE`, so two guesses sent at once can't both be accepted. `times_answered` is incremented in the same transaction.
-- Tier and points come from `tier_and_points` in `services/scoring.py`, for now from `base_rarity` alone. The tier table (names, cutoffs, points) is the `TIERS` constant there; a rarity exactly on a cutoff belongs to the rarer tier. The `times_answered` blend and the boundary tests are still F-033.
+- Tier and points come from `blended_rarity` and `tier_and_points` in `services/scoring.py` (F-033).
 
-### F-033 · Scoring v1 · `todo`
+### F-033 · Scoring v1 · `done`
 Pure function in `services/scoring.py`. Points are fixed per rarity tier; the maximum for a day is 700.
 
 | Outcome | Points |
@@ -348,10 +348,22 @@ Pure function in `services/scoring.py`. Points are fixed per rarity tier; the ma
 | `weeb` | 85 |
 | `uh-ni-me` (rarest answers) | 100 |
 
-- [ ] No valid answer → 0
-- [ ] A valid answer's tier comes from its rarity (0–1) with cutoffs at 0.2, 0.4, 0.6 and 0.8. Tier names, cutoffs and points live in one constants block (the cutoffs are placeholders to tune after playtesting)
-- [ ] Blends in `times_answered` once a prompt has at least `SCORING_BLEND_MIN_SUBMISSIONS` submissions
-- [ ] Unit tests for each tier boundary
+- [x] No valid answer → 0
+- [x] A valid answer's tier comes from its rarity (0–1) with cutoffs at 0.2, 0.4, 0.6 and 0.8. Tier names, cutoffs and points live in one constants block (the cutoffs are placeholders to tune after playtesting)
+- [x] Blends in `times_answered` once a prompt has at least `SCORING_BLEND_MIN_SUBMISSIONS` submissions
+- [x] Unit tests for each tier boundary
+
+Implementation notes:
+
+- Two pure functions in `services/scoring.py`: `blended_rarity` turns an answer's `base_rarity` and the prompt's answer counts into a rarity, and `tier_and_points` turns a rarity into a tier and points. `tier_and_points(None)` is no valid answer: no tier, `NO_ANSWER_POINTS` (0).
+- The constants block is `TIERS` (name, lowest rarity, points), `NO_ANSWER_POINTS` and the two blend constants below. A rarity exactly on a cutoff belongs to the rarer tier.
+- A prompt's "submissions" are its accepted answers: the sum of `times_answered` over its `prompt_answer` rows. Expired and unanswered prompts say nothing about which answers are common, so they don't count.
+- Blend formula, once that total reaches `SCORING_BLEND_MIN_SUBMISSIONS`:
+  - `observed = 1 - log(1 + times_answered) / log(1 + most_answered)`, where `most_answered` is the count of the prompt's most-given answer. Like `base_rarity`, it is log-scaled and normalized within the prompt: 0 for the most-given answer, 1 for one nobody gave.
+  - `weight = BLEND_MAX_WEIGHT * extra / (extra + BLEND_HALF_WEIGHT_SUBMISSIONS)`, where `extra = total - SCORING_BLEND_MIN_SUBMISSIONS`. With the current constants (0.5 and 500) the weight is 0 at 50 submissions, 0.08 at 150, 0.25 at 550, 0.33 at 1,050 and never passes 0.5, so popularity always counts for at least half. Both constants sit next to `TIERS` and are deliberately slow placeholders to tune after playtesting.
+  - `rarity = (1 - weight) * base_rarity + weight * observed`
+- Below the minimum the rarity is `base_rarity` alone. The weight starts at 0, so nothing jumps when a prompt crosses the minimum.
+- The counts include the player's own answer: `times_answered` is incremented first, then the answer is scored, in the same transaction (F-032).
 
 ### F-034 · Anonymous players · `todo`
 Create a player with a UUID cookie on first visit. No login for the MVP.
@@ -413,7 +425,7 @@ Tailwind theme tokens (colors, type, spacing), with light and dark mode.
 
 ## Open questions
 
-- Tune after playtesting: rarity cutoffs (F-033), `MATCH_SIMILARITY_THRESHOLD` (0.4 for now) and `MAX_GUESSES_PER_PROMPT` (20 for now).
+- Tune after playtesting: rarity cutoffs and blend speed (F-033), `MATCH_SIMILARITY_THRESHOLD` (0.4 for now) and `MAX_GUESSES_PER_PROMPT` (20 for now).
 - Visual identity (F-043): palette, fonts, tier colors and share emoji. Decide before M4.
 - Hosting: Vercel (frontend) + Fly/Render/Railway (API + Postgres)? Decide before deploying.
 - Stale answer sets: "currently airing" and `ran_for` prompts (F-020) depend on the year they were generated, and an anime can end after its prompt was generated. Decide how close to its puzzle day such a prompt must be regenerated (F-021, F-022).

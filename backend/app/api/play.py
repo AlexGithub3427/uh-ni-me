@@ -1,4 +1,4 @@
-"""Playing a day's prompts (F-031, F-032)."""
+"""Playing a day's prompts (F-031, F-032, F-033)."""
 
 import uuid
 from datetime import UTC, date, datetime, timedelta
@@ -94,7 +94,7 @@ async def submit_answer(
         if submission.outcome is None:
             submission.outcome = "expired"
             submission.finished_at = submission.started_at + open_for
-            submission.points = 0
+            submission.points = scoring.NO_ANSWER_POINTS
             await session.commit()
         return GuessResult(accepted=False, finished=True)
 
@@ -110,9 +110,16 @@ async def submit_answer(
         await session.commit()
         return GuessResult(accepted=False, finished=False)
 
-    base_rarity = await puzzle_service.count_answer(session, prompt.id, entity.id)
+    counts = await puzzle_service.count_answer(session, prompt.id, entity.id)
+    rarity = scoring.blended_rarity(
+        counts.base_rarity,
+        times_answered=counts.times_answered,
+        most_answered=counts.most_answered,
+        total_answered=counts.total_answered,
+        min_submissions=settings.scoring_blend_min_submissions,
+    )
     # Stored now and never recomputed, however the answer's rarity moves later.
-    tier, points = scoring.tier_and_points(base_rarity)
+    tier, points = scoring.tier_and_points(rarity)
     result = GuessResult(
         accepted=True,
         finished=True,
