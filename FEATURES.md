@@ -378,12 +378,20 @@ Implementation notes:
 - Cookie: `player_id=<uuid>; HttpOnly; SameSite=Lax; Path=/; Max-Age=34560000` (400 days, the longest browsers keep a cookie). A request with a valid cookie gets no `Set-Cookie`, so the lifetime is not renewed.
 - The cookie has no `Secure` attribute yet, so it also works over plain HTTP in local development.
 
-### F-035 · Prompt result and answer list · `todo`
+### F-035 · Prompt result and answer list · `done`
 `GET /api/play/{day}/prompt/{n}/result` returns the player's outcome for a finished prompt plus every valid answer.
-- [ ] Rejected (409) until the prompt is finished for this player
-- [ ] Returns the player's `outcome`, `matched_name`, `points` and `rarity_tier`
-- [ ] Returns `answers`: all of the prompt's valid answers sorted alphabetically by name, each with its current `rarity_tier`
-- [ ] If the deadline has passed and `outcome` is still NULL, writes `expired` before responding
+- [x] Rejected (409) until the prompt is finished for this player
+- [x] Returns the player's `outcome`, `matched_name`, `points` and `rarity_tier`
+- [x] Returns `answers`: all of the prompt's valid answers sorted alphabetically by name, each with its current `rarity_tier`
+- [x] If the deadline has passed and `outcome` is still NULL, writes `expired` before responding
+
+Implementation notes:
+
+- Response: `{ outcome, matched_name, points, rarity_tier, answers: [{ name, rarity_tier }] }`. `outcome` is `accepted` or `expired`. For an expired prompt `matched_name` and `rarity_tier` are null and `points` is 0.
+- Rejections: the same 404s as F-031, 401 for a missing, malformed or unknown `player_id` cookie (as in F-032; the endpoint only reads the cookie), and 409 for a prompt that was never started or is still being played. None of them contains `answers`.
+- The player's `points` and `rarity_tier` are the ones stored when they answered (F-032). The tiers in `answers` are computed on each request from the current `times_answered` counts with `blended_rarity` and `tier_and_points` (F-033), so the player's own answer can appear in the list with a different tier than the one they scored.
+- `answers` holds each answer's `canonical_name` once; aliases are not listed. The order ignores case and is sorted in Python (`prompt_answers` in `services/puzzle.py`), so it doesn't depend on the database collation.
+- The `expired` write is the same as F-032's (`finished_at = started_at` + limit + grace, `points = 0`); both endpoints share `_expire_if_unanswered` in `api/play.py`. The submission row is read `FOR UPDATE`, so a guess being accepted at the same moment is not overwritten. Reading a result again changes nothing.
 
 ---
 

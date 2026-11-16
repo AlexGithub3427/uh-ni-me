@@ -1,4 +1,4 @@
-"""Playing a day's prompts (F-031, F-032, F-033) as an anonymous player (F-034)."""
+"""Playing a day's prompts (F-031, F-032, F-033, F-035) as an anonymous player (F-034)."""
 
 import uuid
 from datetime import UTC, date, datetime, timedelta
@@ -10,8 +10,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.api.deps import PLAYER_COOKIE, PLAYER_COOKIE_MAX_AGE, get_now, get_player_id
 from app.config import Settings, get_settings
 from app.db import get_session
-from app.models import Prompt
-from app.schemas.play import Guess, GuessResult, PromptStart
+from app.models import Entity, Prompt, Submission
+from app.schemas.play import Guess, GuessResult, PromptResult, PromptStart, ValidAnswer
 from app.services import puzzle as puzzle_service
 from app.services import scoring
 from app.services.matching import match_answer
@@ -40,6 +40,21 @@ async def _todays_prompt(
 def _open_for(settings: Settings) -> timedelta:
     """How long after a prompt is served a guess is still taken: the limit plus grace."""
     return timedelta(seconds=settings.answer_time_limit_seconds + settings.answer_grace_seconds)
+
+
+async def _expire_if_unanswered(
+    session: AsyncSession, submission: Submission, open_for: timedelta
+) -> None:
+    """Write ``expired`` to a submission that ran out of time with no accepted answer.
+
+    The caller has checked that the prompt is finished and holds the row lock.
+    """
+    if submission.outcome is None:
+        submission.outcome = "expired"
+        # When the time ran out, not when the server noticed.
+        submission.finished_at = submission.started_at + open_for
+        submission.points = scoring.NO_ANSWER_POINTS
+        await session.commit()
 
 
 @router.post("/play/{day}/prompt/{n}/start")
@@ -118,11 +133,7 @@ async def submit_answer(
     open_for = _open_for(settings)
     if puzzle_service.is_finished(submission, now=now, time_limit=open_for):
         # Too late: the guess is not matched.
-        if submission.outcome is None:
-            submission.outcome = "expired"
-            submission.finished_at = submission.started_at + open_for
-            submission.points = scoring.NO_ANSWER_POINTS
-            await session.commit()
+        await _expire_if_unanswered(session, submission, open_for)
         return GuessResult(accepted=False, finished=True)
 
     if submission.guess_count >= settings.max_guesses_per_prompt:
@@ -162,3 +173,64 @@ async def submit_answer(
     submission.rarity_tier = tier
     await session.commit()
     return result
+
+
+@router.get("/play/{day}/prompt/{n}/result")
+async def prompt_result(
+    day: date,
+    n: int,
+    session: Annotated[AsyncSession, Depends(get_session)],
+    now: Annotated[datetime, Depends(get_now)],
+    player_id: Annotated[uuid.UUID | None, Depends(get_player_id)],
+    settings: Annotated[Settings, Depends(get_settings)],
+) -> PromptResult:
+    """The player's outcome for a finished prompt ``n``, and every valid answer to it."""
+    prompt, player_id = await _todays_prompt(session, day, n, now, player_id)
+
+    if player_id is None:
+        # Without a player nothing was started, so nothing is finished (F-034).
+        raise HTTPException(status_code=401, detail="Unknown player")
+
+    # Locked, so a guess being accepted at this moment is not overwritten as expired.
+    submission = await puzzle_service.submission_at(session, player_id, day, n, lock=True)
+    if submission is None:
+        raise HTTPException(status_code=409, detail=f"Prompt {n} has not been started")
+    open_for = _open_for(settings)
+    if not puzzle_service.is_finished(submission, now=now, time_limit=open_for):
+        raise HTTPException(status_code=409, detail=f"Prompt {n} is not finished")
+    await _expire_if_unanswered(session, submission, open_for)
+    matched = (
+        await session.get(Entity, submission.matched_entity_id)
+        if submission.matched_entity_id is not None
+        else None
+    )
+    return PromptResult(
+        outcome=submission.outcome,
+        matched_name=matched.canonical_name if matched else None,
+        points=submission.points or scoring.NO_ANSWER_POINTS,
+        rarity_tier=submission.rarity_tier,
+        answers=_with_current_tiers(
+            await puzzle_service.prompt_answers(session, prompt.id), settings
+        ),
+    )
+
+
+def _with_current_tiers(
+    answers: list[puzzle_service.ListedAnswer], settings: Settings
+) -> list[ValidAnswer]:
+    """Each answer with the tier it would score if it were given now."""
+    counts = [answer.times_answered for answer in answers]
+    most_answered, total_answered = max(counts, default=0), sum(counts)
+    listed = []
+    for answer in answers:
+        rarity = scoring.blended_rarity(
+            answer.base_rarity,
+            times_answered=answer.times_answered,
+            most_answered=most_answered,
+            total_answered=total_answered,
+            min_submissions=settings.scoring_blend_min_submissions,
+        )
+        tier, _ = scoring.tier_and_points(rarity)
+        assert tier is not None  # a rarity always has a tier
+        listed.append(ValidAnswer(name=answer.name, rarity_tier=tier))
+    return listed

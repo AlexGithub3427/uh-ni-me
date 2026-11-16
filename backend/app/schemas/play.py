@@ -1,4 +1,4 @@
-"""Request and response bodies for playing a prompt (F-031, F-032)."""
+"""Request and response bodies for playing a prompt (F-031, F-032, F-035)."""
 
 from datetime import datetime
 from typing import Annotated
@@ -38,3 +38,24 @@ class GuessResult(BaseModel):
     matched_name: str | None = None
     points: int = 0
     rarity_tier: str | None = None
+
+
+class ValidAnswer(BaseModel):
+    """One of a prompt's valid answers, with the tier it would score now."""
+
+    name: str
+    rarity_tier: str
+
+
+class PromptResult(BaseModel):
+    """A finished prompt: what the player scored and every valid answer (F-035).
+
+    ``points`` and ``rarity_tier`` are the player's, as stored when they answered. The
+    tiers in ``answers`` are current, so the player's own answer may have moved since.
+    """
+
+    outcome: str
+    matched_name: str | None = None
+    points: int = 0
+    rarity_tier: str | None = None
+    answers: list[ValidAnswer]

@@ -8,7 +8,7 @@ from sqlalchemy import func, select, update
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.models import DailyPuzzle, Player, Prompt, PromptAnswer, Submission
+from app.models import DailyPuzzle, Entity, Player, Prompt, PromptAnswer, Submission
 from app.schemas.puzzle import PromptProgress
 
 
@@ -125,6 +125,27 @@ async def count_answer(session: AsyncSession, prompt_id: int, entity_id: int) ->
         most_answered=most,
         total_answered=total,
     )
+
+
+@dataclass(frozen=True)
+class ListedAnswer:
+    """One valid answer of a prompt, with what the scorer needs for its current rarity."""
+
+    name: str
+    base_rarity: float
+    times_answered: int
+
+
+async def prompt_answers(session: AsyncSession, prompt_id: int) -> list[ListedAnswer]:
+    """Every valid answer of the prompt, alphabetically by name, ignoring case (F-035)."""
+    rows = await session.execute(
+        select(Entity.canonical_name, PromptAnswer.base_rarity, PromptAnswer.times_answered)
+        .join(Entity, Entity.id == PromptAnswer.entity_id)
+        .where(PromptAnswer.prompt_id == prompt_id)
+    )
+    answers = [ListedAnswer(*row) for row in rows]
+    # Sorted here, not by Postgres, so the order doesn't depend on the database's collation.
+    return sorted(answers, key=lambda answer: (answer.name.casefold(), answer.name))
 
 
 async def player_progress(
