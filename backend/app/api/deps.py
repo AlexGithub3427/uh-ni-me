@@ -8,6 +8,8 @@ from fastapi import Cookie
 
 # The anonymous player's id (F-034).
 PLAYER_COOKIE = "player_id"
+# 400 days, the longest lifetime browsers keep a cookie for.
+PLAYER_COOKIE_MAX_AGE = 400 * 24 * 60 * 60
 
 
 def get_now() -> datetime:
@@ -20,7 +22,7 @@ def get_player_id(
 ) -> uuid.UUID | None:
     """The player id in the cookie, or None when it is missing or malformed.
 
-    TODO(F-034): create the ``player`` row and set the cookie on first visit.
+    Read-only: the player is created, and the cookie set, when prompt 1 is started (F-034).
     """
     if cookie is None:
         return None

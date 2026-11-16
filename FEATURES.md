@@ -308,7 +308,7 @@ Implementation notes:
 Implementation notes:
 
 - Response: `{ position, text, started_at, deadline }`. `deadline` is `started_at` plus `ANSWER_TIME_LIMIT_SECONDS`, without the grace, so the countdown ends at 25 seconds while the server still accepts a guess for `ANSWER_GRACE_SECONDS` more.
-- Rejections: 404 for a `day` that is not today or a position outside the puzzle, 401 for a missing, malformed or unknown `player_id` cookie (until F-034 creates players), 409 when prompt n-1 is not finished. None of them creates a `submission` row or returns prompt text.
+- Rejections: 404 for a `day` that is not today or a position outside the puzzle, 409 when prompt n-1 is not finished. A missing, malformed or unknown `player_id` cookie is not a rejection: the start creates a new player (F-034). None of them creates a `submission` row or returns prompt text.
 - Starting a prompt again always returns the original `started_at` and `deadline`, also after it is finished. The row is inserted with `ON CONFLICT DO NOTHING`, so two racing requests keep the first start time.
 - The "finished" rule is `is_finished` in `backend/app/services/puzzle.py`, shared with F-030. Seed helpers for gameplay API tests are in `backend/tests/game_helpers.py`.
 
@@ -329,7 +329,7 @@ Implementation notes:
 Implementation notes:
 
 - The matcher is `match_answer` in `backend/app/services/matching.py`. It joins `prompt_answer` to `entity_alias`, so only the prompt's own answers are candidates. An exact match on the normalized alias wins; otherwise the most similar alias wins if its similarity is strictly above the threshold. Ties are settled by `entity.popularity`. The threshold is compared as a `real`, because `similarity()` returns one: compared as a double, a similarity of exactly 0.4 would pass a 0.4 threshold.
-- Checks run in this order: 422 for the body (blank after trimming, or longer than 200 characters), then the same 404 / 401 rejections as F-031, 409 for a prompt never started or already answered, the deadline, 429 for the guess limit, and only then the match. So a player who is out of guesses still gets `finished: true` once the time is up.
+- Checks run in this order: 422 for the body (blank after trimming, or longer than 200 characters), then the same 404 rejections as F-031, 401 for a missing, malformed or unknown `player_id` cookie (a guess never creates a player, F-034), 409 for a prompt never started or already answered, the deadline, 429 for the guess limit, and only then the match. So a player who is out of guesses still gets `finished: true` once the time is up.
 - Only matched guesses count toward `guess_count`: wrong and accepted ones do, while 422, 429 and late guesses don't. `wrong_guesses` and `raw_text` hold the text as typed, trimmed.
 - An expired prompt gets `finished_at = started_at` + limit + grace (when it ran out, not when the server noticed) and `points = 0`. Guessing again on an expired prompt returns the same `accepted: false, finished: true` and changes nothing.
 - `points` is 0 in every response that is not an accepted answer; `matched_name` and `rarity_tier` are null.
@@ -365,11 +365,18 @@ Implementation notes:
 - Below the minimum the rarity is `base_rarity` alone. The weight starts at 0, so nothing jumps when a prompt crosses the minimum.
 - The counts include the player's own answer: `times_answered` is incremented first, then the answer is scored, in the same transaction (F-032).
 
-### F-034 · Anonymous players · `todo`
+### F-034 · Anonymous players · `done`
 Create a player with a UUID cookie on first visit. No login for the MVP.
-- [ ] A request without the cookie creates a `player` row and sets an HttpOnly, `SameSite=Lax` cookie. It is a first-party cookie because the browser reaches the API through the same-origin `/api/*` rewrite (F-001)
-- [ ] A request with a valid cookie reuses the existing player
-- [ ] An unknown or malformed cookie value is replaced with a new player (not a 500)
+- [x] A request without the cookie creates a `player` row and sets an HttpOnly, `SameSite=Lax` cookie. It is a first-party cookie because the browser reaches the API through the same-origin `/api/*` rewrite (F-001)
+- [x] A request with a valid cookie reuses the existing player
+- [x] An unknown or malformed cookie value is replaced with a new player (not a 500)
+
+Implementation notes:
+
+- The player is created by `POST /api/play/{day}/prompt/{n}/start` (F-031), the first request that needs one. The `player` row is inserted in the same transaction as the `submission` row, and the cookie is set only on that 200 response. A rejected start (404, 409) creates no player and sets no cookie, so there are no orphan players. In practice this means starting prompt 1: a visitor without a known player has finished nothing, so starting prompt 2 or later is still a 409.
+- The other endpoints only read the cookie. `GET /api/puzzle/today` returns an empty `progress` for a missing, malformed or unknown cookie (F-030), so page loads and crawlers don't create players. `POST .../answer` still returns 401 for one (F-032), because a guess can't come before a start.
+- Cookie: `player_id=<uuid>; HttpOnly; SameSite=Lax; Path=/; Max-Age=34560000` (400 days, the longest browsers keep a cookie). A request with a valid cookie gets no `Set-Cookie`, so the lifetime is not renewed.
+- The cookie has no `Secure` attribute yet, so it also works over plain HTTP in local development.
 
 ### F-035 · Prompt result and answer list · `todo`
 `GET /api/play/{day}/prompt/{n}/result` returns the player's outcome for a finished prompt plus every valid answer.
