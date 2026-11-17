@@ -398,17 +398,23 @@ Implementation notes:
 
 ## Milestone 4: Frontend
 
-### F-040 · Home / start screen · `todo`
+### F-040 · Home / start screen · `done`
 Today's date, a short "how to play", and a Start button. Shows a "come back tomorrow" state if today is already played.
-- [ ] Shows today's puzzle date (UTC) from `GET /api/puzzle/today`
-- [ ] Start goes to the first unfinished prompt (resumes a partly played day)
-- [ ] All prompts finished → "come back tomorrow" with a link to results
-- [ ] No puzzle for today → a friendly "no puzzle yet" state, not an error page
+- [x] Shows today's puzzle date (UTC) from `GET /api/puzzle/today`
+- [x] Start goes to the first unfinished prompt (resumes a partly played day)
+- [x] All prompts finished → "come back tomorrow" with a link to results
+- [x] No puzzle for today → a friendly "no puzzle yet" state, not an error page
 
 Implementation notes:
 
 - Before any frontend code, read the Next.js guides bundled in `frontend/node_modules/next/dist/docs/` (see `frontend/AGENTS.md`): this version has breaking changes.
-- F-040 is the first feature to call the gameplay API, so it extends `frontend/lib/api.ts`: a POST helper next to `getJson`, one function per endpoint as they are needed, and the snake_case → camelCase mapping.
+- `app/page.tsx` is a static server component with the title and the how to play. The part that depends on the player is the client component `components/StartScreen.tsx`, which calls `getTodayPuzzle()` from the browser so the `player_id` cookie goes along.
+- `getTodayPuzzle()` in `frontend/lib/api.ts` maps the response to camelCase and resolves to `null` on 404 (no puzzle today). Any other failure rejects, and the screen then shows "Couldn't load today's puzzle" with a Try again button.
+- Page routes, which F-041 and F-042 have to provide: the Start button links to `/play/{day}/{n}` with `n = len(progress) + 1`, and the results link to `/play/{day}/results`. Until those features exist both links lead to the 404 page.
+- The button reads "Start" for an unplayed day and "Continue" (with "Prompt n of N") for a partly played one.
+- The date is shown as e.g. "Monday, November 16, 2026", formatted in UTC so it is the puzzle's day in every time zone.
+- No POST helper was added to `lib/api.ts`: this screen only reads. It comes with F-041, the first feature that posts (`TODO(F-041)` in `lib/api.ts`).
+- The `HealthStatus` component (F-001) is no longer shown on the home page; the component and its tests are still in the repo.
 - Screens before F-043 use the placeholder tokens already in `tailwind.config.ts`; the real palette and fonts come with F-043.
 
 ### F-041 · Prompt screen · `todo`
@@ -421,6 +427,7 @@ Prompt text, a visible 25s countdown, an autofocused input and Enter to submit.
 
 Implementation notes:
 
+- Route: `/play/{day}/{n}` (the home screen links here, F-040). This is the first feature that posts, so it adds the POST helper to `frontend/lib/api.ts` next to `getJson`.
 - When the countdown reaches zero with no accepted guess, the server has not been told. The client then fetches the result (F-035), which writes `expired`. The result endpoint answers 409 until the limit plus `ANSWER_GRACE_SECONDS` has passed, and `deadline` excludes the grace, so the client waits out the grace or retries on 409.
 - A 429 from the answer endpoint means the player is out of guesses (`MAX_GUESSES_PER_PROMPT`). No response says how many guesses are left, and the screen does not show a count: on 429 it stops taking guesses and waits for the timer.
 - At 00:00 UTC the day in the URL stops being today, so every play endpoint answers 404 for a game still in progress. Send the player back to the home screen.
@@ -434,6 +441,7 @@ Total score, the rarity tier of each answer, and a spoiler-free share string (e.
 
 Implementation notes:
 
+- Route: `/play/{day}/results` (the home screen links here, F-040).
 - Score and tiers come from `progress` in `GET /api/puzzle/today` (F-030); the total is the sum of `points`.
 - No endpoint change for prompt text: the criteria above don't need it. If a row should show it, `POST .../start` on a finished prompt returns the text and changes nothing (F-031).
 - The share string needs one emoji per rarity tier plus one for a prompt with no answer. They are not chosen yet (Open questions); choose them before building this.
