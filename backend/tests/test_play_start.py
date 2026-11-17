@@ -77,6 +77,35 @@ async def test_f031_response_has_started_at_and_deadline_in_server_time(
     assert datetime.fromisoformat(body["deadline"]) == NOON + limit
 
 
+async def test_f031_response_has_now_the_servers_time_when_it_answered(
+    api_client: httpx2.AsyncClient, api_session: AsyncSession
+) -> None:
+    await new_player(api_client, api_session)
+    set_now(NOON)
+
+    body = (await api_client.post(start_url(1))).json()
+
+    assert datetime.fromisoformat(body["now"]) == NOON
+
+
+async def test_f031_starting_again_returns_the_current_now_with_the_original_deadline(
+    api_client: httpx2.AsyncClient, api_session: AsyncSession
+) -> None:
+    await new_player(api_client, api_session)
+    set_now(NOON)
+    first = (await api_client.post(start_url(1))).json()
+
+    later = NOON + timedelta(seconds=10)
+    set_now(later)
+    body = (await api_client.post(start_url(1))).json()
+
+    assert datetime.fromisoformat(body["now"]) == later
+    assert body["deadline"] == first["deadline"]
+    # What a resumed countdown shows: the time left, by the server's clock alone.
+    left = datetime.fromisoformat(body["deadline"]) - datetime.fromisoformat(body["now"])
+    assert left == timedelta(seconds=get_settings().answer_time_limit_seconds - 10)
+
+
 async def test_f031_prompt_n_is_rejected_until_the_previous_prompt_is_started(
     api_client: httpx2.AsyncClient, api_session: AsyncSession
 ) -> None:
@@ -213,7 +242,8 @@ async def test_f031_starting_again_returns_the_original_start_time(
     response = await api_client.post(start_url(1))
 
     assert response.status_code == 200
-    assert response.json() == first
+    # Everything but ``now``, the server's time at each response, is unchanged.
+    assert response.json() == first | {"now": response.json()["now"]}
     [row] = await submissions(api_session)
     assert row.started_at == NOON
 
@@ -228,7 +258,7 @@ async def test_f031_starting_again_after_the_deadline_does_not_reopen_the_prompt
     set_now(NOON + timedelta(minutes=5))
     response = await api_client.post(start_url(1))
 
-    assert response.json() == first
+    assert response.json() == first | {"now": response.json()["now"]}
     [row] = await submissions(api_session)
     assert row.started_at == NOON
 
@@ -249,7 +279,7 @@ async def test_f031_response_never_contains_answers(
 
     response = await api_client.post(start_url(1))
 
-    assert set(response.json()) == {"position", "text", "started_at", "deadline"}
+    assert set(response.json()) == {"position", "text", "started_at", "deadline", "now"}
     assert "Secret Answer" not in response.text
 
 

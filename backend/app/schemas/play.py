@@ -17,6 +17,9 @@ class PromptStart(BaseModel):
     # Server time. ``deadline`` is ``started_at`` plus the answer time limit, without the grace.
     started_at: datetime
     deadline: datetime
+    # When the server answered. The time left is ``deadline`` minus ``now``, so the client's
+    # countdown never reads the player's clock, also when it resumes a started prompt.
+    now: datetime
 
 
 class Guess(BaseModel):

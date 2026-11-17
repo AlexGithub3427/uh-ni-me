@@ -104,6 +104,7 @@ async def start_prompt(
         text=prompt.text,
         started_at=started_at,
         deadline=started_at + timedelta(seconds=settings.answer_time_limit_seconds),
+        now=now,
     )
 
 
