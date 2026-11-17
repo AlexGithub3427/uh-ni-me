@@ -297,17 +297,18 @@ Implementation notes:
 - The player comes from the `player_id` cookie, which this endpoint only reads. A missing, malformed or unknown cookie gives an empty `progress`. Creating the player and setting the cookie is F-034.
 - API tests are async and use the `api_session` and `api_client` fixtures in `backend/tests/conftest.py` (asyncpg, rolled back per test). The clock is the `get_now` dependency in `backend/app/api/deps.py`; tests override it.
 
-### F-031 · Serve prompt · `done`
+### F-031 · Serve prompt · `in-progress`
 `POST /api/play/{day}/prompt/{n}/start` returns the prompt text and records the server start time by creating the player's `submission` row with `started_at`.
 - [x] Prompts are served in order; prompt n requires n-1 to be finished ("finished" is defined in CLAUDE.md, Game integrity)
 - [x] `day` must be today (UTC); other days are rejected until archive mode (F-052)
 - [x] Calling start again for an already-started prompt returns the original start time and does not reset the timer
 - [x] Response includes `started_at` and `deadline` (server time) so the client can render the countdown
+- [ ] Response includes `now`, the server's time when it answered, also when the prompt was started earlier. The client measures the time left as `deadline` − `now`, so a resumed prompt's countdown does not depend on the player's clock (needed by F-041)
 - [x] Never includes answers
 
 Implementation notes:
 
-- Response: `{ position, text, started_at, deadline }`. `deadline` is `started_at` plus `ANSWER_TIME_LIMIT_SECONDS`, without the grace, so the countdown ends at 25 seconds while the server still accepts a guess for `ANSWER_GRACE_SECONDS` more.
+- Response: `{ position, text, started_at, deadline }`, plus `now` once the open criterion above is built. `deadline` is `started_at` plus `ANSWER_TIME_LIMIT_SECONDS`, without the grace, so the countdown ends at 25 seconds while the server still accepts a guess for `ANSWER_GRACE_SECONDS` more.
 - Rejections: 404 for a `day` that is not today or a position outside the puzzle, 409 when prompt n-1 is not finished. A missing, malformed or unknown `player_id` cookie is not a rejection: the start creates a new player (F-034). None of them creates a `submission` row or returns prompt text.
 - Starting a prompt again always returns the original `started_at` and `deadline`, also after it is finished. The row is inserted with `ON CONFLICT DO NOTHING`, so two racing requests keep the first start time.
 - The "finished" rule is `is_finished` in `backend/app/services/puzzle.py`, shared with F-030. Seed helpers for gameplay API tests are in `backend/tests/game_helpers.py`.
@@ -404,13 +405,26 @@ Today's date, a short "how to play", and a Start button. Shows a "come back tomo
 - [ ] All prompts finished → "come back tomorrow" with a link to results
 - [ ] No puzzle for today → a friendly "no puzzle yet" state, not an error page
 
+Implementation notes:
+
+- Before any frontend code, read the Next.js guides bundled in `frontend/node_modules/next/dist/docs/` (see `frontend/AGENTS.md`): this version has breaking changes.
+- F-040 is the first feature to call the gameplay API, so it extends `frontend/lib/api.ts`: a POST helper next to `getJson`, one function per endpoint as they are needed, and the snake_case → camelCase mapping.
+- Screens before F-043 use the placeholder tokens already in `tailwind.config.ts`; the real palette and fonts come with F-043.
+
 ### F-041 · Prompt screen · `todo`
 Prompt text, a visible 25s countdown, an autofocused input and Enter to submit.
-- [ ] The countdown reflects server time (latency-tolerant)
+- [ ] The countdown reflects server time (latency-tolerant): the time left is `deadline` − `now` from the start response (F-031), counted down from when the response arrived, never read from the player's clock
 - [ ] A wrong guess shows brief "not a valid answer" feedback, clears the input and keeps it focused so the player can retry until the timer ends
 - [ ] When the prompt is finished, shows the result (accepted or time's up, matched name, points, tier) and a Next button
 - [ ] The finished state includes the answer browser (from F-035): every valid answer in alphabetical order, a search box, and a filter by rarity tier. Search and filter run client-side
 - [ ] Usable on mobile; the input stays visible above the on-screen keyboard
+
+Implementation notes:
+
+- Depends on the open `now` criterion of F-031; build that first.
+- When the countdown reaches zero with no accepted guess, the server has not been told. The client then fetches the result (F-035), which writes `expired`. The result endpoint answers 409 until the limit plus `ANSWER_GRACE_SECONDS` has passed, and `deadline` excludes the grace, so the client waits out the grace or retries on 409.
+- A 429 from the answer endpoint means the player is out of guesses (`MAX_GUESSES_PER_PROMPT`). No response says how many guesses are left, and the screen does not show a count: on 429 it stops taking guesses and waits for the timer.
+- At 00:00 UTC the day in the URL stops being today, so every play endpoint answers 404 for a game still in progress. Send the player back to the home screen.
 
 ### F-042 · Results screen · `todo`
 Total score, the rarity tier of each answer, and a spoiler-free share string (e.g. emoji tiers per prompt).
@@ -418,6 +432,12 @@ Total score, the rarity tier of each answer, and a spoiler-free share string (e.
 - [ ] Each prompt row opens that prompt's answer browser (the same component as F-041)
 - [ ] Share string contains the date and one emoji per prompt, and no answer text
 - [ ] Copy-to-clipboard button for the share string
+
+Implementation notes:
+
+- Score and tiers come from `progress` in `GET /api/puzzle/today` (F-030); the total is the sum of `points`.
+- No endpoint change for prompt text: the criteria above don't need it. If a row should show it, `POST .../start` on a finished prompt returns the text and changes nothing (F-031).
+- The share string needs one emoji per rarity tier plus one for a prompt with no answer. They are not chosen yet (Open questions); choose them before building this.
 
 ### F-043 · Visual identity · `todo`
 Tailwind theme tokens (colors, type, spacing), with light and dark mode.
@@ -441,7 +461,7 @@ Tailwind theme tokens (colors, type, spacing), with light and dark mode.
 ## Open questions
 
 - Tune after playtesting: rarity cutoffs and blend speed (F-033), `MATCH_SIMILARITY_THRESHOLD` (0.4 for now) and `MAX_GUESSES_PER_PROMPT` (20 for now).
-- Visual identity (F-043): palette, fonts, tier colors and share emoji. Decide before M4.
+- Visual identity (F-043): palette, fonts and tier colors. F-040 to F-042 are built with placeholder tokens, so decide these before F-043. The share emoji (one per tier, one for no answer) are needed sooner: decide them before F-042.
 - Hosting: Vercel (frontend) + Fly/Render/Railway (API + Postgres)? Decide before deploying.
 - Stale answer sets: "currently airing" and `ran_for` prompts (F-020) depend on the year they were generated, and an anime can end after its prompt was generated. Decide how close to its puzzle day such a prompt must be regenerated (F-021, F-022).
 - Catalogue size: how many anime should production hold (`--limit`)? Only the 500-anime dev seed is defined. Decide before the first production ingest, once prompts exist and their answer counts can be checked.
