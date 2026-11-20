@@ -417,13 +417,13 @@ Implementation notes:
 - The `HealthStatus` component (F-001) is no longer shown on the home page; the component and its tests are still in the repo.
 - Screens before F-043 use the placeholder tokens already in `tailwind.config.ts`; the real palette and fonts come with F-043.
 
-### F-041 · Prompt screen · `todo`
+### F-041 · Prompt screen · `done`
 Prompt text, a visible 25s countdown, an autofocused input and Enter to submit.
-- [ ] The countdown reflects server time (latency-tolerant): the time left is `deadline` − `now` from the start response (F-031), counted down from when the response arrived, never read from the player's clock
-- [ ] A wrong guess shows brief "not a valid answer" feedback, clears the input and keeps it focused so the player can retry until the timer ends
-- [ ] When the prompt is finished, shows the result (accepted or time's up, matched name, points, tier) and a Next button
-- [ ] The finished state includes the answer browser (from F-035): every valid answer in alphabetical order, a search box, and a filter by rarity tier. Search and filter run client-side
-- [ ] Usable on mobile; the input stays visible above the on-screen keyboard
+- [x] The countdown reflects server time (latency-tolerant): the time left is `deadline` − `now` from the start response (F-031), counted down from when the response arrived, never read from the player's clock
+- [x] A wrong guess shows brief "not a valid answer" feedback, clears the input and keeps it focused so the player can retry until the timer ends
+- [x] When the prompt is finished, shows the result (accepted or time's up, matched name, points, tier) and a Next button
+- [x] The finished state includes the answer browser (from F-035): every valid answer in alphabetical order, a search box, and a filter by rarity tier. Search and filter run client-side
+- [x] Usable on mobile; the input stays visible above the on-screen keyboard
 
 Implementation notes:
 
@@ -431,6 +431,14 @@ Implementation notes:
 - When the countdown reaches zero with no accepted guess, the server has not been told. The client then fetches the result (F-035), which writes `expired`. The result endpoint answers 409 until the limit plus `ANSWER_GRACE_SECONDS` has passed, and `deadline` excludes the grace, so the client waits out the grace or retries on 409.
 - A 429 from the answer endpoint means the player is out of guesses (`MAX_GUESSES_PER_PROMPT`). No response says how many guesses are left, and the screen does not show a count: on 429 it stops taking guesses and waits for the timer.
 - At 00:00 UTC the day in the URL stops being today, so every play endpoint answers 404 for a game still in progress. Send the player back to the home screen.
+- Files: `app/play/[day]/[n]/page.tsx` (layout and viewport), `components/PromptRoute.tsx` (reads the params; an `n` that is not a positive integer is a 404), `components/PromptScreen.tsx` (the game) and `components/AnswerBrowser.tsx` (reused by F-042). `lib/api.ts` gained `postJson`, `startPrompt`, `submitGuess`, `getPromptResult` and the `RARITY_TIERS` list.
+- The countdown end is `performance.now()` at the moment the start response arrived plus `deadline` − `now`. It is a monotonic clock, so neither a wrong nor a changing wall clock moves it. Resuming a prompt whose time is already up goes straight to the result.
+- Every way of finishing (accepted guess, `finished: true` from a late guess, countdown at zero, 409 "already answered" from another tab) leads to one `GET .../result` call, which supplies both the result and the answer list. On 409 it retries every second until the grace has passed.
+- Other responses: 404 or 409 on start, and 404 or 401 on a guess, send the player home with `router.replace("/")` (the home screen knows the next prompt). A 429 disables the input with "Out of guesses" and waits for the timer. A network error on a guess keeps the typed text and says the guess couldn't be sent; other start or result failures show Try again.
+- The input stays enabled while a guess is in flight (disabling it would drop the focus); a second Enter is ignored until the response arrives.
+- Next goes to `/play/{day}/{n+1}`, or "See your results" to `/play/{day}/results` on the last prompt. The prompt count comes from `GET /api/puzzle/today`; if that call fails, Next goes to the home screen.
+- Mobile: the input sits right under the prompt near the top of the page, and the route's viewport sets `interactive-widget=resizes-content`, so on browsers that support it the page shrinks above the keyboard instead of sliding under it (iOS Safari ignores it, but scrolls the focused input into view). The input turns off autocorrect, autocapitalize and spellcheck, and its Enter key reads "send".
+- The answer browser keeps the server's alphabetical order. Its search ignores case, accents and macrons ("kyoso" finds "Kyōsōgiga"), as a display filter only. The tier filter is a select with "All tiers".
 
 ### F-042 · Results screen · `todo`
 Total score, the rarity tier of each answer, and a spoiler-free share string (e.g. emoji tiers per prompt).

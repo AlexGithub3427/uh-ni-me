@@ -20,6 +20,20 @@ async function getJson<T>(path: `/api/${string}`): Promise<T> {
   return (await response.json()) as T;
 }
 
+async function postJson<T>(path: `/api/${string}`, body?: unknown): Promise<T> {
+  const headers: Record<string, string> = { Accept: "application/json" };
+  const init: RequestInit = { method: "POST", headers };
+  if (body !== undefined) {
+    headers["Content-Type"] = "application/json";
+    init.body = JSON.stringify(body);
+  }
+  const response = await fetch(path, init);
+  if (!response.ok) {
+    throw new ApiError(response.status, `POST ${path} failed with ${response.status}`);
+  }
+  return (await response.json()) as T;
+}
+
 export interface Health {
   status: string;
 }
@@ -28,7 +42,10 @@ export function getHealth(): Promise<Health> {
   return getJson<Health>("/api/health");
 }
 
-export type RarityTier = "larp" | "normie" | "niche" | "weeb" | "uh-ni-me";
+/** Rarity tiers from most common to rarest (F-033). */
+export const RARITY_TIERS = ["larp", "normie", "niche", "weeb", "uh-ni-me"] as const;
+
+export type RarityTier = (typeof RARITY_TIERS)[number];
 
 export interface PromptProgress {
   position: number;
@@ -77,4 +94,108 @@ export async function getTodayPuzzle(): Promise<TodayPuzzle | null> {
   };
 }
 
-// TODO(F-041): add the POST helper and the start, answer and result calls.
+function promptPath(day: string, position: number, action: string): `/api/${string}` {
+  return `/api/play/${encodeURIComponent(day)}/prompt/${position}/${action}`;
+}
+
+export interface StartedPrompt {
+  position: number;
+  text: string;
+  /** Server times (ISO 8601). `deadline` excludes the grace period. */
+  startedAt: string;
+  deadline: string;
+  /** The server's time when it answered. Time left is `deadline` − `now`. */
+  now: string;
+}
+
+interface StartedPromptWire {
+  position: number;
+  text: string;
+  started_at: string;
+  deadline: string;
+  now: string;
+}
+
+/**
+ * Serve prompt `position` of `day` and start its timer, or resume it with the
+ * original start time. Creates the player cookie on the first start.
+ */
+export async function startPrompt(day: string, position: number): Promise<StartedPrompt> {
+  const wire = await postJson<StartedPromptWire>(promptPath(day, position, "start"));
+  return {
+    position: wire.position,
+    text: wire.text,
+    startedAt: wire.started_at,
+    deadline: wire.deadline,
+    now: wire.now,
+  };
+}
+
+export interface GuessResult {
+  accepted: boolean;
+  /** `finished` without `accepted` means the prompt ran out of time. */
+  finished: boolean;
+  matchedName: string | null;
+  points: number;
+  rarityTier: RarityTier | null;
+}
+
+interface GuessResultWire {
+  accepted: boolean;
+  finished: boolean;
+  matched_name: string | null;
+  points: number;
+  rarity_tier: RarityTier | null;
+}
+
+export async function submitGuess(
+  day: string,
+  position: number,
+  text: string,
+): Promise<GuessResult> {
+  const wire = await postJson<GuessResultWire>(promptPath(day, position, "answer"), { text });
+  return {
+    accepted: wire.accepted,
+    finished: wire.finished,
+    matchedName: wire.matched_name,
+    points: wire.points,
+    rarityTier: wire.rarity_tier,
+  };
+}
+
+export interface ValidAnswer {
+  name: string;
+  rarityTier: RarityTier;
+}
+
+export interface PromptResult {
+  outcome: "accepted" | "expired";
+  matchedName: string | null;
+  points: number;
+  rarityTier: RarityTier | null;
+  /** Every valid answer, sorted alphabetically by the server. */
+  answers: ValidAnswer[];
+}
+
+interface PromptResultWire {
+  outcome: PromptResult["outcome"];
+  matched_name: string | null;
+  points: number;
+  rarity_tier: RarityTier | null;
+  answers: { name: string; rarity_tier: RarityTier }[];
+}
+
+/** The player's result and every valid answer. 409 until the prompt is finished. */
+export async function getPromptResult(day: string, position: number): Promise<PromptResult> {
+  const wire = await getJson<PromptResultWire>(promptPath(day, position, "result"));
+  return {
+    outcome: wire.outcome,
+    matchedName: wire.matched_name,
+    points: wire.points,
+    rarityTier: wire.rarity_tier,
+    answers: wire.answers.map((answer) => ({
+      name: answer.name,
+      rarityTier: answer.rarity_tier,
+    })),
+  };
+}
