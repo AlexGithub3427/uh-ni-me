@@ -27,3 +27,54 @@ export interface Health {
 export function getHealth(): Promise<Health> {
   return getJson<Health>("/api/health");
 }
+
+export type RarityTier = "larp" | "normie" | "niche" | "weeb" | "uh-ni-me";
+
+export interface PromptProgress {
+  position: number;
+  outcome: "accepted" | "expired";
+  points: number;
+  rarityTier: RarityTier | null;
+}
+
+export interface TodayPuzzle {
+  /** UTC calendar date, YYYY-MM-DD. */
+  day: string;
+  promptCount: number;
+  /** Finished prompts only, ordered by position. */
+  progress: PromptProgress[];
+}
+
+interface TodayPuzzleWire {
+  day: string;
+  prompt_count: number;
+  progress: {
+    position: number;
+    outcome: PromptProgress["outcome"];
+    points: number;
+    rarity_tier: RarityTier | null;
+  }[];
+}
+
+/** Today's puzzle and the player's progress, or null when today has no puzzle. */
+export async function getTodayPuzzle(): Promise<TodayPuzzle | null> {
+  let wire: TodayPuzzleWire;
+  try {
+    wire = await getJson<TodayPuzzleWire>("/api/puzzle/today");
+  } catch (error) {
+    if (error instanceof ApiError && error.status === 404) return null;
+    throw error;
+  }
+  return {
+    day: wire.day,
+    promptCount: wire.prompt_count,
+    progress: wire.progress.map((entry) => ({
+      position: entry.position,
+      outcome: entry.outcome,
+      points: entry.points,
+      rarityTier: entry.rarity_tier,
+    })),
+  };
+}
+
+// TODO(F-041): add the POST helper and the start, answer and result calls.
